@@ -1,4 +1,4 @@
-all: linux windows deb
+all: linux deb
 
 .PHONY: linux deb
 
