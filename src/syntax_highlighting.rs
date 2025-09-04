@@ -27,7 +27,7 @@ pub fn apply_syntax_highlighting(
         buffer.remove_tag(&tag, &buffer.start_iter(), &buffer.end_iter());
     }
 
-    // Fallback to syntect for non-Rust files
+    // syntect for syntax highlighting
     let mut h = syntect::easy::HighlightLines::new(syntax, theme);
     for (line_num, line) in text.lines().enumerate() {
         if let Ok(ranges) = h.highlight_line(line, ps) {
