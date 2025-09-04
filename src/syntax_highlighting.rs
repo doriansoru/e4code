@@ -73,17 +73,32 @@ pub fn apply_syntax_highlighting(
 }
 
 /// Updates bracket highlighting in a text view
+use std::rc::Rc;
+use std::cell::RefCell;
+use gtk4::TextIter;
+
 pub fn update_bracket_highlighting(
     text_view: &gtk4::TextView,
-    find_matching_bracket_fn: fn(&gtk4::TextIter, &TextBuffer) -> Option<gtk4::TextIter>
+    find_matching_bracket_fn: fn(&gtk4::TextIter, &TextBuffer) -> Option<gtk4::TextIter>,
+    prev_bracket_pos1: &Rc<RefCell<Option<TextIter>>>,
+    prev_bracket_pos2: &Rc<RefCell<Option<TextIter>>>,
 ) {
     let buffer = text_view.buffer();
     let cursor_mark = buffer.get_insert();
     let iter = buffer.iter_at_mark(&cursor_mark);
 
-    buffer.remove_tag_by_name("bracket_match", &buffer.start_iter(), &buffer.end_iter());
+    // Remove previous bracket highlights
+    let tag_table = buffer.tag_table();
+    if let Some(tag) = tag_table.lookup("bracket_match") {
+        if let Some(prev_pos1) = prev_bracket_pos1.borrow_mut().take() {
+            if let Some(prev_pos2) = prev_bracket_pos2.borrow_mut().take() {
+                buffer.remove_tag(&tag, &prev_pos1, &{let mut i = prev_pos1.clone(); i.forward_char(); i});
+                buffer.remove_tag(&tag, &prev_pos2, &{let mut i = prev_pos2.clone(); i.forward_char(); i});
+            }
+        }
+    }
+
     if let Some(matching_iter) = find_matching_bracket_fn(&iter, &buffer) {
-        let tag_table = buffer.tag_table();
         let tag = if let Some(tag) = tag_table.lookup("bracket_match") {
             tag
         } else {
@@ -96,5 +111,13 @@ pub fn update_bracket_highlighting(
         };
         buffer.apply_tag(&tag, &iter, &{let mut i = iter.clone(); i.forward_char(); i});
         buffer.apply_tag(&tag, &matching_iter, &{let mut i = matching_iter.clone(); i.forward_char(); i});
+
+        // Store current bracket positions
+        *prev_bracket_pos1.borrow_mut() = Some(iter);
+        *prev_bracket_pos2.borrow_mut() = Some(matching_iter);
+    } else {
+        // No match found, clear stored positions
+        *prev_bracket_pos1.borrow_mut() = None;
+        *prev_bracket_pos2.borrow_mut() = None;
     }
 }

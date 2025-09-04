@@ -51,6 +51,9 @@ struct AppState {
     window: ApplicationWindow,
     highlight_closure: Rc<dyn Fn(TextBuffer)>,
     line_numbers_area: DrawingArea,
+    syntax_highlight_timer: Rc<RefCell<Option<glib::SourceId>>>,
+    prev_bracket_pos1: Rc<RefCell<Option<TextIter>>>,
+    prev_bracket_pos2: Rc<RefCell<Option<TextIter>>>,
 }
 
 impl AppState {
@@ -182,6 +185,11 @@ impl AppState {
         let last_line = Rc::new(RefCell::new(1u32));
         let last_col = Rc::new(RefCell::new(1u32));
 
+        // Initialize these Rc<RefCell>s here
+        let syntax_highlight_timer = Rc::new(RefCell::new(None::<glib::SourceId>));
+        let prev_bracket_pos1 = Rc::new(RefCell::new(None));
+        let prev_bracket_pos2 = Rc::new(RefCell::new(None));
+
         // --- Main Closures ---
 
         let highlight_closure: Rc<dyn Fn(TextBuffer)> = Rc::new({
@@ -200,12 +208,30 @@ impl AppState {
             let status_bar = status_bar.clone();
             let last_line = last_line.clone();
             let last_col = last_col.clone();
+            let syntax_highlight_timer = syntax_highlight_timer.clone();
+            let prev_bracket_pos1 = prev_bracket_pos1.clone();
+            let prev_bracket_pos2 = prev_bracket_pos2.clone();
 
             Rc::new(move |buffer: &TextBuffer, text_view: &TextView| {
                 // connect_changed
                 let highlight_closure_clone = highlight_closure.clone();
+                let syntax_highlight_timer_clone = syntax_highlight_timer.clone();
                 buffer.connect_changed(move |buf| {
-                    highlight_closure_clone(buf.clone());
+                    // Cancel any existing timer
+                    if let Some(source_id) = syntax_highlight_timer_clone.borrow_mut().take() {
+                        source_id.remove();
+                    }
+
+                    let buf_clone = buf.clone();
+                    let highlight_closure_clone_inner = highlight_closure_clone.clone();
+                    let timer_ref = syntax_highlight_timer_clone.clone();
+
+                    // Set a new timer
+                    let source_id = glib::timeout_add_local_once(std::time::Duration::from_millis(200), move || {
+                        highlight_closure_clone_inner(buf_clone);
+                        *timer_ref.borrow_mut() = None; // Clear the timer ID once it fires
+                    });
+                    *syntax_highlight_timer_clone.borrow_mut() = Some(source_id);
                 });
         
                 // connect_mark_set
@@ -213,6 +239,8 @@ impl AppState {
                 let text_view_clone_for_mark_set = text_view.clone(); // Clone text_view for this closure
                 let last_line_clone_for_mark_set = last_line.clone();
                 let last_col_clone_for_mark_set = last_col.clone();
+                let prev_bracket_pos1_for_mark_set = prev_bracket_pos1.clone(); // Clone for mark_set closure
+                let prev_bracket_pos2_for_mark_set = prev_bracket_pos2.clone(); // Clone for mark_set closure
                 buffer.connect_mark_set(move |buffer: &TextBuffer, _iter: &TextIter, mark: &TextMark| {
                     // Ensure we are only reacting to the insert mark (cursor)
                     if mark.name() == Some("insert".into()) {
@@ -228,8 +256,15 @@ impl AppState {
                     }
 
                     let text_view_for_idle = text_view_clone_for_mark_set.clone();
+                    let prev_bracket_pos1_clone_for_idle = prev_bracket_pos1_for_mark_set.clone();
+                let prev_bracket_pos2_clone_for_idle = prev_bracket_pos2_for_mark_set.clone();
                 glib::idle_add_local_once(move || {
-                    syntax_highlighting::update_bracket_highlighting(&text_view_for_idle, find_matching_bracket);
+                    syntax_highlighting::update_bracket_highlighting(
+                        &text_view_for_idle,
+                        find_matching_bracket,
+                        &prev_bracket_pos1_clone_for_idle,
+                        &prev_bracket_pos2_clone_for_idle,
+                    );
                 });
 
                     // Clear existing highlights
@@ -244,8 +279,15 @@ impl AppState {
                             if let Some(scrolled_window) = line_numbers_area.next_sibling().and_then(|w| w.downcast_ref::<gtk4::ScrolledWindow>().map(|w| w.clone())) {
                                 let text_view_clone_for_scroll = text_view.clone();
                                 let line_numbers_area_clone_for_scroll = line_numbers_area.clone();
+                                let prev_bracket_pos1_clone_for_scroll_conn = prev_bracket_pos1.clone();
+                                let prev_bracket_pos2_clone_for_scroll_conn = prev_bracket_pos2.clone();
                                 scrolled_window.vadjustment().connect_value_changed(move |_| {
-                                    syntax_highlighting::update_bracket_highlighting(&text_view_clone_for_scroll, find_matching_bracket);
+                                    syntax_highlighting::update_bracket_highlighting(
+                                        &text_view_clone_for_scroll,
+                                        find_matching_bracket,
+                                        &prev_bracket_pos1_clone_for_scroll_conn,
+                                        &prev_bracket_pos2_clone_for_scroll_conn,
+                                    );
                                     line_numbers_area_clone_for_scroll.queue_draw();
                                 });
 
@@ -560,6 +602,9 @@ impl AppState {
             window,
             highlight_closure,
             line_numbers_area,
+            syntax_highlight_timer,
+            prev_bracket_pos1,
+            prev_bracket_pos2,
         }))
     }
 }
