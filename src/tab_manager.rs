@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow, Label, Notebook, ScrolledWindow, TextBuffer, TextView};
+use gtk4::{
+    Application, ApplicationWindow, Box, Button, Label, Notebook, ScrolledWindow, TextBuffer,
+    TextView,
+};
 
 use gtk4::pango;
 use std::cell::RefCell;
@@ -129,9 +132,28 @@ pub fn open_file_in_new_tab(
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or("Untitled");
-            let tab_label = gtk4::Label::new(Some(filename));
-            let page_num = notebook.append_page(&text_view_with_line_numbers_box, Some(&tab_label));
+            let tab_label_box = Box::new(gtk4::Orientation::Horizontal, 5);
+            let tab_label = Label::new(Some(filename));
+            let close_button = Button::from_icon_name("window-close-symbolic");
+            close_button.add_css_class("flat");
+
+            tab_label_box.append(&tab_label);
+            tab_label_box.append(&close_button);
+
+            let page_num =
+                notebook.append_page(&text_view_with_line_numbers_box, Some(&tab_label_box));
             notebook.set_current_page(Some(page_num));
+
+            let notebook_clone = notebook.clone();
+            let buffer_paths_clone = buffer_paths.clone();
+            if let Some(window) = app.active_window() {
+                if let Some(app_window) = window.downcast_ref::<ApplicationWindow>() {
+                    let window_clone = app_window.clone();
+                    close_button.connect_clicked(move |_| {
+                        close_tab(&window_clone, &notebook_clone, &buffer_paths_clone, page_num);
+                    });
+                }
+            }
 
             highlight_closure(new_buffer.clone());
         }
@@ -149,7 +171,7 @@ pub fn open_file_in_new_tab(
 pub fn create_new_file_tab(
     notebook: &Notebook,
     highlight_closure: &Rc<dyn Fn(TextBuffer) + 'static>,
-    _buffer_paths: &Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
+    buffer_paths: &Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
     app: &Application,
     current_font_desc: &Rc<RefCell<pango::FontDescription>>,
     update_font: &Rc<dyn Fn(&pango::FontDescription) + 'static>,
@@ -222,10 +244,14 @@ pub fn create_new_file_tab(
         for i in 0..notebook.n_pages() {
             if let Some(page) = notebook.nth_page(Some(i)) {
                 if let Some(label_widget) = notebook.tab_label(&page) {
-                    if let Some(label) = label_widget.downcast_ref::<Label>() {
-                        if label.text().as_str() == tab_name {
-                            name_exists = true;
-                            break;
+                    if let Some(tab_box) = label_widget.downcast_ref::<Box>() {
+                        if let Some(child_widget) = tab_box.first_child() {
+                            if let Some(label) = child_widget.downcast_ref::<Label>() {
+                                if label.text().as_str() == tab_name {
+                                    name_exists = true;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -238,9 +264,28 @@ pub fn create_new_file_tab(
         tab_name = format!("Untitled-{}", counter);
     }
 
-    let tab_label = gtk4::Label::new(Some(&tab_name));
-    let page_num = notebook.append_page(&text_view_with_line_numbers_box, Some(&tab_label));
+    let tab_label_box = Box::new(gtk4::Orientation::Horizontal, 5);
+    let tab_label = Label::new(Some(&tab_name));
+    let close_button = Button::from_icon_name("window-close-symbolic");
+    close_button.add_css_class("flat");
+
+    tab_label_box.append(&tab_label);
+    tab_label_box.append(&close_button);
+
+    let page_num =
+        notebook.append_page(&text_view_with_line_numbers_box, Some(&tab_label_box));
     notebook.set_current_page(Some(page_num));
+
+    let notebook_clone = notebook.clone();
+    let buffer_paths_clone = buffer_paths.clone();
+    if let Some(window) = app.active_window() {
+        if let Some(app_window) = window.downcast_ref::<ApplicationWindow>() {
+            let window_clone = app_window.clone();
+            close_button.connect_clicked(move |_| {
+                close_tab(&window_clone, &notebook_clone, &buffer_paths_clone, page_num);
+            });
+        }
+    }
 
     highlight_closure(new_buffer.clone());
 }
@@ -394,6 +439,48 @@ pub fn save_buffer_to_file(
     std::fs::write(file_path, content)
 }
 
+pub fn close_tab(
+    window: &ApplicationWindow,
+    notebook: &Notebook,
+    buffer_paths: &Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
+    page_num: u32,
+) {
+    if let Some(page) = notebook.nth_page(Some(page_num)) {
+        if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
+            if let Some(scrolled_window) = text_view_with_line_numbers_box
+                .last_child()
+                .and_then(|w| w.downcast::<ScrolledWindow>().ok())
+            {
+                if let Some(text_view) = scrolled_window
+                    .child()
+                    .and_then(|w| w.downcast::<TextView>().ok())
+                {
+                    let buffer = text_view.buffer();
+                    let buffer_paths_borrowed = buffer_paths.borrow();
+                    let file_path = buffer_paths_borrowed.get(&buffer).cloned();
+
+                    if is_buffer_modified(&buffer, file_path.as_ref()) {
+                        drop(buffer_paths_borrowed);
+                        prompt_save_changes_async(
+                            window,
+                            buffer,
+                            file_path,
+                            buffer_paths.clone(),
+                            notebook.clone(),
+                            page_num,
+                            |_proceed| {},
+                        );
+                    } else {
+                        drop(buffer_paths_borrowed);
+                        buffer_paths.borrow_mut().remove(&buffer);
+                        notebook.remove_page(Some(page_num));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Closes the current tab with save prompt if needed
 pub fn close_current_tab(
     window: &ApplicationWindow,
@@ -401,54 +488,7 @@ pub fn close_current_tab(
     buffer_paths: &Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
 ) {
     if let Some(current_page) = notebook.current_page() {
-        if let Some(page) = notebook.nth_page(Some(current_page)) {
-            // Get the buffer from the text view
-            if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                if let Some(scrolled_window) = text_view_with_line_numbers_box
-                    .last_child()
-                    .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                {
-                    if let Some(text_view) = scrolled_window
-                        .child()
-                        .and_then(|w| w.downcast::<TextView>().ok())
-                    {
-                        let buffer = text_view.buffer();
-
-                        // Check if buffer has a path and if it's modified
-                        let buffer_paths_borrowed = buffer_paths.borrow();
-                        let file_path = buffer_paths_borrowed.get(&buffer).cloned();
-
-                        if is_buffer_modified(&buffer, file_path.as_ref()) {
-                            // Drop the borrow before showing dialog
-                            drop(buffer_paths_borrowed);
-
-                            // Show save prompt asynchronously
-                            prompt_save_changes_async(
-                                window,
-                                buffer,
-                                file_path,
-                                buffer_paths.clone(),
-                                notebook.clone(),
-                                current_page,
-                                |_proceed| {
-                                    // The callback handles all the logic
-                                },
-                            );
-                        } else {
-                            // Not modified, close the tab directly
-                            // Drop the borrow
-                            drop(buffer_paths_borrowed);
-
-                            // Remove from buffer_paths map
-                            buffer_paths.borrow_mut().remove(&buffer);
-
-                            // Close the tab
-                            notebook.remove_page(Some(current_page));
-                        }
-                    }
-                }
-            }
-        }
+        close_tab(window, notebook, buffer_paths, current_page);
     }
 }
 
@@ -502,7 +542,7 @@ pub fn close_all_tabs_with_prompts(
     fn process_next_buffer(
         window: ApplicationWindow,
         notebook: Notebook,
-        buffer_paths: Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
+        buffer_paths: Rc<RefCell<HashMap<TextBuffer, PathBuf>>>,
         mut buffers_to_check: Vec<(TextBuffer, Option<PathBuf>, u32)>,
     ) {
         if let Some((buffer, file_path, page_index)) = buffers_to_check.pop() {

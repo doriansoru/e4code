@@ -1,7 +1,7 @@
 use crate::settings::AppSettings;
 use gtk4::prelude::*;
 use gtk4::{
-    FileChooserAction, FileChooserDialog, ResponseType, ScrolledWindow, TextView, TreeStore,
+    FileChooserAction, FileChooserDialog, ResponseType, ScrolledWindow, TextView, TreeStore, Box, Label
 };
 use std::cell::RefCell;
 use std::fs;
@@ -106,8 +106,11 @@ pub fn update_tab_label(
                                 .file_name()
                                 .and_then(|s| s.to_str())
                                 .unwrap_or("Untitled");
-                            let tab_label = gtk4::Label::new(Some(filename));
-                            notebook.set_tab_label(&page, Some(&tab_label));
+                            if let Some(tab_label_box) = notebook.tab_label(&page).and_then(|w| w.downcast::<Box>().ok()) {
+                                if let Some(label) = tab_label_box.first_child().and_then(|w| w.downcast::<Label>().ok()) {
+                                    label.set_text(filename);
+                                }
+                            }
                             break;
                         }
                     }

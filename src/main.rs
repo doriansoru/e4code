@@ -9,9 +9,9 @@ mod utils;
 
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box, HeaderBar, Label, MenuButton, Notebook,
-    Orientation, Paned, PopoverMenu, ScrolledWindow, Settings, TextBuffer, TextIter, TextMark,
-    TextView, TreeStore, TreeView,
+    Application, ApplicationWindow, Box, HeaderBar, Label, MenuButton, Notebook, Orientation,
+    Paned, PopoverMenu, ScrolledWindow, Settings, TextBuffer, TextIter, TextMark, TextView,
+    TreeStore, TreeView,
 };
 use std::collections::HashMap;
 
@@ -352,8 +352,6 @@ impl AppState {
             })
         };
 
-        
-
         // --- Menu and Action Setup ---
         let file_menu_button = MenuButton::builder().label("File").build();
         let file_menu_model = gio::Menu::new();
@@ -554,7 +552,7 @@ impl AppState {
             notebook,
             window,
             highlight_closure,
-            
+
             syntax_highlight_timer,
         }))
     }
@@ -577,8 +575,20 @@ fn main() -> glib::ExitCode {
                 let new_state = AppState::new(app);
                 let mut opened_any_file = false;
                 // If no files were opened via command line, open last opened files
-                if new_state.borrow().app_settings.borrow().last_opened_files.is_some() {
-                    if let Some(files_to_open) = new_state.borrow().app_settings.borrow().last_opened_files.clone() {
+                if new_state
+                    .borrow()
+                    .app_settings
+                    .borrow()
+                    .last_opened_files
+                    .is_some()
+                {
+                    if let Some(files_to_open) = new_state
+                        .borrow()
+                        .app_settings
+                        .borrow()
+                        .last_opened_files
+                        .clone()
+                    {
                         for path in files_to_open {
                             if path.is_file() {
                                 tab_manager::open_file_in_new_tab(
