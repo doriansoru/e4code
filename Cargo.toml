@@ -2,9 +2,10 @@
 name = "e4code"
 version = "0.1.0"
 edition = "2024"
+authors = [ "Dorian Soru" ]
 
 [dependencies]
-syntect = { version = "5.2" }
+syntect = { version = "5" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "6.0"
@@ -12,3 +13,20 @@ gtk4 = { version = "0.10" }
 gio = "0.21"
 glib = "0.21"
 regex = "1"
+
+
+[package.metadata.deb]
+maintainer = "Dorian Soru <doriansoru@gmail.com>"
+copyright = "2024, Dorian Soru <doriansoru@gmail.com>"
+license-file = ["LICENSE", "0"]
+extended-description = """A lightweight code editor built with Rust and GTK4."""
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+    # target/release path is special, and gets replaced by cargo-deb with the actual target dir path.
+    ["target/release/e4code", "usr/bin/", "755"],
+    # both array and object syntaxes are equivalent:
+    { source = "README.md", dest = "usr/share/doc/e4code/README", mode = "644"},
+]
+# assets = ["$auto"] # the default if assets are not specified

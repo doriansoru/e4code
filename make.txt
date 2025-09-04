@@ -1,0 +1,96 @@
+cargo build --release
+warning: multiple fields are never read
+  --> src/main.rs:38:5
+   |
+35 | struct AppState {
+   |        -------- fields in this struct
+...
+38 |     ps: Rc<SyntaxSet>,
+   |     ^^
+39 |     ts: Rc<ThemeSet>,
+   |     ^^
+40 |     syntax: Rc<SyntaxReference>,
+   |     ^^^^^^
+41 |     current_theme: Rc<RefCell<Theme>>,
+   |     ^^^^^^^^^^^^^
+...
+45 |     status_bar: Rc<RefCell<Label>>,
+   |     ^^^^^^^^^^
+46 |     last_line: Rc<RefCell<u32>>,
+   |     ^^^^^^^^^
+47 |     last_col: Rc<RefCell<u32>>,
+   |     ^^^^^^^^
+...
+53 |     line_numbers_area: DrawingArea,
+   |     ^^^^^^^^^^^^^^^^^
+54 |     syntax_highlight_timer: Rc<RefCell<Option<glib::SourceId>>>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+55 |     prev_bracket_pos1: Rc<RefCell<Option<TextIter>>>,
+   |     ^^^^^^^^^^^^^^^^^
+56 |     prev_bracket_pos2: Rc<RefCell<Option<TextIter>>>,
+   |     ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: `e4code` (bin "e4code") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.09s
+Linux executable is located at: target/release/e4code
+cargo build --release --target x86_64-pc-windows-gnu
+   Compiling windows_x86_64_gnu v0.53.0
+   Compiling libc v0.2.175
+   Compiling glib-sys v0.21.1
+   Compiling gobject-sys v0.21.1
+warning: glib-sys@0.21.1: pkg-config has not been configured to support cross-compilation.
+error: failed to run custom build command for `glib-sys v0.21.1`
+
+Caused by:
+  process didn't exit successfully: `/home/srbntt/Documenti/ProgrammiInformatici/rust/e4code/target/release/build/glib-sys-6cb1fc3b42aefa23/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-changed=/home/srbntt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/glib-sys-0.21.1/Cargo.toml
+  cargo:rerun-if-env-changed=GLIB_2.0_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALLOW_CROSS_x86_64-pc-windows-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALLOW_CROSS_x86_64_pc_windows_gnu
+  cargo:rerun-if-env-changed=TARGET_PKG_CONFIG_ALLOW_CROSS
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALLOW_CROSS
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64-pc-windows-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64_pc_windows_gnu
+  cargo:rerun-if-env-changed=TARGET_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64-pc-windows-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64_pc_windows_gnu
+  cargo:rerun-if-env-changed=TARGET_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+  cargo:warning=pkg-config has not been configured to support cross-compilation.
+
+  Install a sysroot for the target platform and configure it via
+  PKG_CONFIG_SYSROOT_DIR and PKG_CONFIG_PATH, or install a
+  cross-compiling wrapper for pkg-config and set it via
+  PKG_CONFIG environment variable.
+warning: build failed, waiting for other jobs to finish...
+warning: gobject-sys@0.21.1: pkg-config has not been configured to support cross-compilation.
+error: failed to run custom build command for `gobject-sys v0.21.1`
+
+Caused by:
+  process didn't exit successfully: `/home/srbntt/Documenti/ProgrammiInformatici/rust/e4code/target/release/build/gobject-sys-2e450c6783d993fc/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-changed=/home/srbntt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gobject-sys-0.21.1/Cargo.toml
+  cargo:rerun-if-env-changed=GOBJECT_2.0_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALLOW_CROSS_x86_64-pc-windows-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALLOW_CROSS_x86_64_pc_windows_gnu
+  cargo:rerun-if-env-changed=TARGET_PKG_CONFIG_ALLOW_CROSS
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALLOW_CROSS
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64-pc-windows-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64_pc_windows_gnu
+  cargo:rerun-if-env-changed=TARGET_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64-pc-windows-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64_pc_windows_gnu
+  cargo:rerun-if-env-changed=TARGET_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+  cargo:warning=pkg-config has not been configured to support cross-compilation.
+
+  Install a sysroot for the target platform and configure it via
+  PKG_CONFIG_SYSROOT_DIR and PKG_CONFIG_PATH, or install a
+  cross-compiling wrapper for pkg-config and set it via
+  PKG_CONFIG environment variable.
+make: *** [Makefile:10: windows] Error 101

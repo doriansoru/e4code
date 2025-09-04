@@ -74,7 +74,7 @@ impl AppState {
 
         let window = gtk4::ApplicationWindow::builder()
             .application(app)
-            .title("E4Code - GTK Version")
+            .title("E4Code")
             .default_width(800)
             .default_height(600)
             .build();
