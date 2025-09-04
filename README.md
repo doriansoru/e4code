@@ -6,21 +6,21 @@ This editor will have the following functions:
 
 ### File
 
-*   **New** - Completed
+*   **New**
 
-*   **Open** - Completed
+*   **Open**
 
-*   **Open directory** - Completed
+*   **Open directory**
 
-*   **Close this file** - Completed
+*   **Close this file**
 
-*   **Close all files** - Completed
+*   **Close all files**
 
-*   **Save** - Completed
+*   **Save**
 
-*   **Save as** - Completed
+*   **Save as**
 
-*   **Exit** - Completed
+*   **Exit**
 
 ### Edit
 
@@ -47,5 +47,3 @@ This editor will have the following functions:
 *   **Tabbed Interface:** Supports opening multiple files in separate tabs.
 
 *   **Directory Tree:** Will have a tree view for the currently open directory.
-
-*   **Unsaved Changes Prompt:** If a file is modified and the user tries to create a new file or close the current one, it will prompt to save changes.
