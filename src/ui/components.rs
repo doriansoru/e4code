@@ -1,8 +1,8 @@
-use gtk4::{DrawingArea, TextView, ScrolledWindow, Orientation};
-use gtk4::prelude::*;
 use gtk4::pango;
-use std::rc::Rc;
+use gtk4::prelude::*;
+use gtk4::{DrawingArea, Orientation, ScrolledWindow, TextView};
 use std::cell::RefCell;
+use std::rc::Rc;
 
 // Constants for line numbers
 pub const LINE_NUMBER_WIDTH: i32 = 50;
@@ -18,13 +18,13 @@ pub fn create_line_numbers_area(
     line_numbers_area.set_width_request(LINE_NUMBER_WIDTH);
     line_numbers_area.set_hexpand(false);
     line_numbers_area.set_vexpand(true);
-    
+
     line_numbers_area.clone().set_draw_func({
         let text_view_clone = text_view.clone();
         let scrolled_window_clone = scrolled_window.clone();
         let current_font_desc_clone = current_font_desc.clone();
         let line_numbers_area_clone_for_closure = line_numbers_area.clone();
-        
+
         move |_, cr, width, height| {
             let text_view = text_view_clone.clone();
             let vadjustment = scrolled_window_clone.vadjustment();
@@ -43,11 +43,15 @@ pub fn create_line_numbers_area(
             let max_line_number = buffer.line_count().max(1);
             let max_digits = max_line_number.to_string().len();
             let test_string = "8".repeat(max_digits);
-            let extents = cr.text_extents(&test_string).expect("Failed to get text extents");
+            let extents = cr
+                .text_extents(&test_string)
+                .expect("Failed to get text extents");
             let required_width = extents.width() + LINE_NUMBER_PADDING * 2.0;
 
             // Update the width_request of the DrawingArea
-            if (line_numbers_area_clone_for_closure.width_request() as f64 - required_width).abs() > 1.0 {
+            if (line_numbers_area_clone_for_closure.width_request() as f64 - required_width).abs()
+                > 1.0
+            {
                 line_numbers_area_clone_for_closure.set_width_request(required_width as i32);
             }
 
@@ -57,7 +61,8 @@ pub fn create_line_numbers_area(
             // More accurate line height calculation using Pango
             let pango_context = text_view.pango_context();
             let font_metrics = pango_context.metrics(Some(&font_desc), None);
-            let line_height = (font_metrics.ascent() + font_metrics.descent()) as f64 / pango::SCALE as f64;
+            let line_height =
+                (font_metrics.ascent() + font_metrics.descent()) as f64 / pango::SCALE as f64;
 
             // Calculate visible lines range
             let start_line = (scroll_y / line_height).floor() as i32;
@@ -88,7 +93,7 @@ pub fn create_line_numbers_area(
             }
         }
     });
-    
+
     line_numbers_area
 }
 
@@ -102,54 +107,4 @@ pub fn create_text_view_with_line_numbers(
     text_view_with_line_numbers_box.append(line_numbers_area);
     text_view_with_line_numbers_box.append(scrolled_window);
     text_view_with_line_numbers_box
-}
-
-/// Finds matching brackets in a text buffer
-pub fn find_matching_bracket(iter: &gtk4::TextIter, _buffer: &gtk4::TextBuffer) -> Option<gtk4::TextIter> {
-    let char_at_iter = iter.char();
-
-    let (open_bracket, close_bracket, forward) = match char_at_iter {
-        '(' => (Some('('), Some(')'), true),
-        ')' => (Some('('), Some(')'), false),
-        '[' => (Some('['), Some(']'), true),
-        ']' => (Some('['), Some(']'), false),
-        '{' => (Some('{'), Some('}'), true),
-        '}' => (Some('{'), Some('}'), false),
-        _ => (None, None, false),
-    };
-
-    if open_bracket.is_none() {
-        return None;
-    }
-
-    let mut search_iter = iter.clone();
-    let mut stack_depth = 1;
-
-    if forward {
-        while search_iter.forward_char() {
-            let current_char = search_iter.char();
-            if current_char == open_bracket.unwrap() {
-                stack_depth += 1;
-            } else if current_char == close_bracket.unwrap() {
-                stack_depth -= 1;
-                if stack_depth == 0 {
-                    return Some(search_iter);
-                }
-            }
-        }
-    } else {
-        while search_iter.backward_char() {
-            let current_char = search_iter.char();
-            if current_char == close_bracket.unwrap() {
-                stack_depth += 1;
-            } else if current_char == open_bracket.unwrap() {
-                stack_depth -= 1;
-                if stack_depth == 0 {
-                    return Some(search_iter);
-                }
-            }
-        }
-    }
-
-    None
 }

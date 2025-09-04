@@ -1,5 +1,5 @@
-use gtk4::{AboutDialog, Dialog, ResponseType, Orientation, Box, Label, ComboBoxText, FontButton};
 use gtk4::prelude::*;
+use gtk4::{AboutDialog, Box, ComboBoxText, Dialog, FontButton, Label, Orientation, ResponseType};
 
 /// Creates a settings dialog
 pub fn create_settings_dialog(
@@ -35,15 +35,13 @@ pub fn create_settings_dialog(
 
     let font_hbox = Box::new(Orientation::Horizontal, 10);
     let font_label = Label::new(Some("Font:"));
-    let font_button = FontButton::builder()
-        .font(current_font)
-        .build();
+    let font_button = FontButton::builder().font(current_font).build();
     font_hbox.append(&font_label);
     font_hbox.append(&font_button);
     vbox.append(&font_hbox);
-    
+
     content_area.append(&vbox);
-    
+
     dialog
 }
 
@@ -56,7 +54,12 @@ pub fn create_about_dialog(parent: &impl IsA<gtk4::Window>) -> AboutDialog {
         .version("0.1.0")
         .comments("A lightweight code editor built with Rust and GTK4.")
         .website("https://github.com/doriansoru/e4code") // Changed to a more specific placeholder
-        .authors(env!("CARGO_PKG_AUTHORS").split(':').map(|s| s.to_string()).collect::<Vec<String>>())
+        .authors(
+            env!("CARGO_PKG_AUTHORS")
+                .split(':')
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>(),
+        )
         .build();
     dialog
 }

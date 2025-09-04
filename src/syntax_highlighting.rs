@@ -1,8 +1,8 @@
-use gtk4::{TextBuffer, TextTag};
-use gtk4::prelude::*;
 use gtk4::gdk;
-use syntect::parsing::SyntaxSet;
+use gtk4::prelude::*;
+use gtk4::{TextBuffer, TextTag};
 use syntect::highlighting::Theme;
+use syntect::parsing::SyntaxSet;
 
 /// Applies syntax highlighting to a text buffer
 pub fn apply_syntax_highlighting(
@@ -19,7 +19,7 @@ pub fn apply_syntax_highlighting(
     tag_table.foreach(|tag| {
         if let Some(name) = tag.name() {
             if name.starts_with("fg_") {
-               tags_to_remove.push(tag.clone());
+                tags_to_remove.push(tag.clone());
             }
         }
     });
@@ -35,11 +35,21 @@ pub fn apply_syntax_highlighting(
             for (style, chunk) in ranges {
                 if let (Some(start_iter), Some(end_iter)) = (
                     buffer.iter_at_line_offset(line_num as i32, current_offset as i32),
-                    buffer.iter_at_line_offset(line_num as i32, (current_offset + chunk.chars().count()) as i32)
+                    buffer.iter_at_line_offset(
+                        line_num as i32,
+                        (current_offset + chunk.chars().count()) as i32,
+                    ),
                 ) {
-                    let tag_name = format!("fg_{:02x}{:02x}{:02x}{:02x}_bg_{:02x}{:02x}{:02x}{:02x}",
-                        style.foreground.r, style.foreground.g, style.foreground.b, style.foreground.a,
-                        style.background.r, style.background.g, style.background.b, style.background.a
+                    let tag_name = format!(
+                        "fg_{:02x}{:02x}{:02x}{:02x}_bg_{:02x}{:02x}{:02x}{:02x}",
+                        style.foreground.r,
+                        style.foreground.g,
+                        style.foreground.b,
+                        style.foreground.a,
+                        style.background.r,
+                        style.background.g,
+                        style.background.b,
+                        style.background.a
                     );
                     let tag = if let Some(existing_tag) = tag_table.lookup(&tag_name) {
                         existing_tag
@@ -53,7 +63,11 @@ pub fn apply_syntax_highlighting(
                             style.foreground.a as f32 / 255.0,
                         )));
                         // Set background color if different from default
-                        if style.background.r != 0 || style.background.g != 0 || style.background.b != 0 || style.background.a != 0 {
+                        if style.background.r != 0
+                            || style.background.g != 0
+                            || style.background.b != 0
+                            || style.background.a != 0
+                        {
                             new_tag.set_background_rgba(Some(&gdk::RGBA::new(
                                 style.background.r as f32 / 255.0,
                                 style.background.g as f32 / 255.0,
@@ -72,10 +86,10 @@ pub fn apply_syntax_highlighting(
     }
 }
 
+use gtk4::TextIter;
+use std::cell::RefCell;
 /// Updates bracket highlighting in a text view
 use std::rc::Rc;
-use std::cell::RefCell;
-use gtk4::TextIter;
 
 pub fn update_bracket_highlighting(
     text_view: &gtk4::TextView,
@@ -92,8 +106,16 @@ pub fn update_bracket_highlighting(
     if let Some(tag) = tag_table.lookup("bracket_match") {
         if let Some(prev_pos1) = prev_bracket_pos1.borrow_mut().take() {
             if let Some(prev_pos2) = prev_bracket_pos2.borrow_mut().take() {
-                buffer.remove_tag(&tag, &prev_pos1, &{let mut i = prev_pos1.clone(); i.forward_char(); i});
-                buffer.remove_tag(&tag, &prev_pos2, &{let mut i = prev_pos2.clone(); i.forward_char(); i});
+                buffer.remove_tag(&tag, &prev_pos1, &{
+                    let mut i = prev_pos1.clone();
+                    i.forward_char();
+                    i
+                });
+                buffer.remove_tag(&tag, &prev_pos2, &{
+                    let mut i = prev_pos2.clone();
+                    i.forward_char();
+                    i
+                });
             }
         }
     }
@@ -109,8 +131,16 @@ pub fn update_bracket_highlighting(
             tag_table.add(&new_tag);
             new_tag
         };
-        buffer.apply_tag(&tag, &iter, &{let mut i = iter.clone(); i.forward_char(); i});
-        buffer.apply_tag(&tag, &matching_iter, &{let mut i = matching_iter.clone(); i.forward_char(); i});
+        buffer.apply_tag(&tag, &iter, &{
+            let mut i = iter.clone();
+            i.forward_char();
+            i
+        });
+        buffer.apply_tag(&tag, &matching_iter, &{
+            let mut i = matching_iter.clone();
+            i.forward_char();
+            i
+        });
 
         // Store current bracket positions
         *prev_bracket_pos1.borrow_mut() = Some(iter);
@@ -120,4 +150,57 @@ pub fn update_bracket_highlighting(
         *prev_bracket_pos1.borrow_mut() = None;
         *prev_bracket_pos2.borrow_mut() = None;
     }
+}
+
+/// Finds matching brackets in a text buffer
+pub fn find_matching_bracket(
+    iter: &gtk4::TextIter,
+    _buffer: &gtk4::TextBuffer,
+) -> Option<gtk4::TextIter> {
+    let char_at_iter = iter.char();
+
+    let (open_bracket, close_bracket, forward) = match char_at_iter {
+        '(' => (Some('('), Some(')'), true),
+        ')' => (Some('('), Some(')'), false),
+        '[' => (Some('['), Some(']'), true),
+        ']' => (Some('['), Some(']'), false),
+        '{' => (Some('{'), Some('}'), true),
+        '}' => (Some('{'), Some('}'), false),
+        _ => (None, None, false),
+    };
+
+    if open_bracket.is_none() {
+        return None;
+    }
+
+    let mut search_iter = iter.clone();
+    let mut stack_depth = 1;
+
+    if forward {
+        while search_iter.forward_char() {
+            let current_char = search_iter.char();
+            if current_char == open_bracket.unwrap() {
+                stack_depth += 1;
+            } else if current_char == close_bracket.unwrap() {
+                stack_depth -= 1;
+                if stack_depth == 0 {
+                    return Some(search_iter);
+                }
+            }
+        }
+    } else {
+        while search_iter.backward_char() {
+            let current_char = search_iter.char();
+            if current_char == close_bracket.unwrap() {
+                stack_depth += 1;
+            } else if current_char == open_bracket.unwrap() {
+                stack_depth -= 1;
+                if stack_depth == 0 {
+                    return Some(search_iter);
+                }
+            }
+        }
+    }
+
+    None
 }

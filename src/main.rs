@@ -1,35 +1,38 @@
 mod actions;
-mod settings;
-mod ui;
 mod file_operations;
+pub mod search;
+mod settings;
 mod syntax_highlighting;
+pub mod tab_manager;
+mod ui;
 mod utils;
 
-use std::collections::HashMap;
-use gtk4::{Application, Box, HeaderBar, MenuButton, Orientation, PopoverMenu, Notebook, Label, TextView, TextBuffer, Settings, TextMark, TextIter, Paned, ScrolledWindow, TreeView, TreeStore, ApplicationWindow, DrawingArea};
 use gtk4::prelude::*;
+use gtk4::{
+    Application, ApplicationWindow, Box, DrawingArea, HeaderBar, Label, MenuButton, Notebook,
+    Orientation, Paned, PopoverMenu, ScrolledWindow, Settings, TextBuffer, TextIter, TextMark,
+    TextView, TreeStore, TreeView,
+};
+use std::collections::HashMap;
 
-use gtk4::pango;
-use syntect::parsing::{SyntaxSet, SyntaxReference};
-use syntect::highlighting::{ThemeSet, Theme};
 use gtk4::gdk;
+use gtk4::pango;
+use syntect::highlighting::{Theme, ThemeSet};
+use syntect::parsing::{SyntaxReference, SyntaxSet};
 
-use std::rc::Rc;
 use std::cell::RefCell;
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
+use std::rc::Rc;
 
-use settings::{load_settings, save_settings, AppSettings};
-use actions::{setup_actions, open_file_in_new_tab, open_directory_in_tree};
+use actions::{open_directory_in_tree, setup_actions};
+use settings::{AppSettings, load_settings, save_settings};
+
 use file_operations::populate_tree_view;
 use utils::add_zoom_controllers_to_text_view;
-use ui::components::{find_matching_bracket, LINE_NUMBER_WIDTH, LINE_NUMBER_PADDING};
+
 use gio::{self};
-
-
-
-
-
+use ui::components::{LINE_NUMBER_PADDING, LINE_NUMBER_WIDTH};
 
 // Struct to contain application state
 struct AppState {
@@ -52,8 +55,6 @@ struct AppState {
     highlight_closure: Rc<dyn Fn(TextBuffer)>,
     line_numbers_area: DrawingArea,
     syntax_highlight_timer: Rc<RefCell<Option<glib::SourceId>>>,
-    prev_bracket_pos1: Rc<RefCell<Option<TextIter>>>,
-    prev_bracket_pos2: Rc<RefCell<Option<TextIter>>>,
 }
 
 impl AppState {
@@ -61,9 +62,13 @@ impl AppState {
         // --- Initial Setup ---
         let app_settings = Rc::new(RefCell::new(load_settings()));
 
-        let buffer_paths: Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>> = Rc::new(RefCell::new(HashMap::new()));
-        
-        let initial_directory: PathBuf = app_settings.borrow().last_opened_directory.clone()
+        let buffer_paths: Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>> =
+            Rc::new(RefCell::new(HashMap::new()));
+
+        let initial_directory: PathBuf = app_settings
+            .borrow()
+            .last_opened_directory
+            .clone()
             .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
         // Save the initial directory if it is valid and not already saved
@@ -122,9 +127,17 @@ impl AppState {
         // --- Data and State Initialization ---
         let ps = Rc::new(SyntaxSet::load_defaults_newlines());
         let ts = Rc::new(ThemeSet::load_defaults());
-        let syntax: Rc<SyntaxReference> = Rc::new(ps.find_syntax_by_extension("rs").unwrap_or_else(|| ps.find_syntax_plain_text()).clone());
-        
-        let initial_syntax_theme_name = if app_settings.borrow().theme == "dark" { "base16-ocean.dark" } else { "InspiredGitHub" };
+        let syntax: Rc<SyntaxReference> = Rc::new(
+            ps.find_syntax_by_extension("rs")
+                .unwrap_or_else(|| ps.find_syntax_plain_text())
+                .clone(),
+        );
+
+        let initial_syntax_theme_name = if app_settings.borrow().theme == "dark" {
+            "base16-ocean.dark"
+        } else {
+            "InspiredGitHub"
+        };
         let current_theme = Rc::new(RefCell::new(ts.themes[initial_syntax_theme_name].clone()));
 
         let notebook = Notebook::new();
@@ -137,27 +150,34 @@ impl AppState {
 
         let update_font: Rc<dyn Fn(&pango::FontDescription)> = Rc::new({
             let provider = provider.clone();
-            let notebook_clone_for_font_update = notebook.clone(); // Clone notebook
+            let window_clone_for_font_update = window.clone();
+            let notebook_clone_for_font_update = notebook.clone();
             move |font_desc: &pango::FontDescription| {
                 let family = font_desc.family().unwrap_or("Monospace".into());
                 let size_pts = font_desc.size() as f64 / pango::SCALE as f64;
                 let css = format!(
                     r#"textview {{ font-family: "{}"; font-size: {}pt; }}"#,
-                    family,
-                    size_pts
+                    family, size_pts
                 );
                 provider.load_from_data(&css);
 
-                // Trigger redraw of line numbers area for the current tab
+                // Redraw the current tab's line number area and queue a resize for the window
                 if let Some(page_num) = notebook_clone_for_font_update.current_page() {
                     if let Some(page) = notebook_clone_for_font_update.nth_page(Some(page_num)) {
-                        if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                            if let Some(line_numbers_area) = text_view_with_line_numbers_box.first_child().and_then(|w| w.downcast_ref::<gtk4::DrawingArea>().map(|w| w.clone())) {
+                        if let Some(text_view_with_line_numbers_box) =
+                            page.downcast_ref::<gtk4::Box>()
+                        {
+                            if let Some(line_numbers_area) =
+                                text_view_with_line_numbers_box.first_child().and_then(|w| {
+                                    w.downcast_ref::<gtk4::DrawingArea>().map(|w| w.clone())
+                                })
+                            {
                                 line_numbers_area.queue_draw();
                             }
                         }
                     }
                 }
+                window_clone_for_font_update.queue_resize();
             }
         });
         update_font(&current_font_desc.borrow());
@@ -168,13 +188,17 @@ impl AppState {
             // Parse the font size from the font string (e.g., "Monospace 14" -> 14.0)
             let parts: Vec<&str> = font_str.split_whitespace().collect();
             if parts.len() >= 2 {
-                parts.last().unwrap_or(&"14.0").parse::<f64>().unwrap_or(14.0)
+                parts
+                    .last()
+                    .unwrap_or(&"14.0")
+                    .parse::<f64>()
+                    .unwrap_or(14.0)
             } else {
                 14.0
             }
         };
         let initial_font_size = Rc::new(RefCell::new(initial_font_size_from_settings));
-        
+
         let status_bar = Rc::new(RefCell::new(Label::new(Some("Line 1, Column 1"))));
         status_bar.borrow_mut().set_halign(gtk4::Align::Start);
         status_bar.borrow_mut().set_margin_start(5);
@@ -187,8 +211,6 @@ impl AppState {
 
         // Initialize these Rc<RefCell>s here
         let syntax_highlight_timer = Rc::new(RefCell::new(None::<glib::SourceId>));
-        let prev_bracket_pos1 = Rc::new(RefCell::new(None));
-        let prev_bracket_pos2 = Rc::new(RefCell::new(None));
 
         // --- Main Closures ---
 
@@ -198,7 +220,12 @@ impl AppState {
             let current_theme = current_theme.clone();
 
             move |buffer: TextBuffer| {
-                syntax_highlighting::apply_syntax_highlighting(&buffer, &*syntax, &ps, &current_theme.borrow());
+                syntax_highlighting::apply_syntax_highlighting(
+                    &buffer,
+                    &*syntax,
+                    &ps,
+                    &current_theme.borrow(),
+                );
             }
         });
 
@@ -209,10 +236,11 @@ impl AppState {
             let last_line = last_line.clone();
             let last_col = last_col.clone();
             let syntax_highlight_timer = syntax_highlight_timer.clone();
-            let prev_bracket_pos1 = prev_bracket_pos1.clone();
-            let prev_bracket_pos2 = prev_bracket_pos2.clone();
 
             Rc::new(move |buffer: &TextBuffer, text_view: &TextView| {
+                // Create the brackets state
+                let prev_bracket_pos1 = Rc::new(RefCell::new(None));
+                let prev_bracket_pos2 = Rc::new(RefCell::new(None));
                 // connect_changed
                 let highlight_closure_clone = highlight_closure.clone();
                 let syntax_highlight_timer_clone = syntax_highlight_timer.clone();
@@ -227,13 +255,16 @@ impl AppState {
                     let timer_ref = syntax_highlight_timer_clone.clone();
 
                     // Set a new timer
-                    let source_id = glib::timeout_add_local_once(std::time::Duration::from_millis(200), move || {
-                        highlight_closure_clone_inner(buf_clone);
-                        *timer_ref.borrow_mut() = None; // Clear the timer ID once it fires
-                    });
+                    let source_id = glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(200),
+                        move || {
+                            highlight_closure_clone_inner(buf_clone);
+                            *timer_ref.borrow_mut() = None; // Clear the timer ID once it fires
+                        },
+                    );
                     *syntax_highlight_timer_clone.borrow_mut() = Some(source_id);
                 });
-        
+
                 // connect_mark_set
                 let status_bar_clone_for_mark_set_closure = status_bar.clone();
                 let text_view_clone_for_mark_set = text_view.clone(); // Clone text_view for this closure
@@ -241,55 +272,77 @@ impl AppState {
                 let last_col_clone_for_mark_set = last_col.clone();
                 let prev_bracket_pos1_for_mark_set = prev_bracket_pos1.clone(); // Clone for mark_set closure
                 let prev_bracket_pos2_for_mark_set = prev_bracket_pos2.clone(); // Clone for mark_set closure
-                buffer.connect_mark_set(move |buffer: &TextBuffer, _iter: &TextIter, mark: &TextMark| {
-                    // Ensure we are only reacting to the insert mark (cursor)
-                    if mark.name() == Some("insert".into()) {
-                        let cursor_iter = buffer.iter_at_mark(&buffer.get_insert());
-                        let line = cursor_iter.line() + 1;
-                        let col = cursor_iter.line_offset() + 1;
+                buffer.connect_mark_set(
+                    move |buffer: &TextBuffer, _iter: &TextIter, mark: &TextMark| {
+                        // Ensure we are only reacting to the insert mark (cursor)
+                        if mark.name() == Some("insert".into()) {
+                            let cursor_iter = buffer.iter_at_mark(&buffer.get_insert());
+                            let line = cursor_iter.line() + 1;
+                            let col = cursor_iter.line_offset() + 1;
 
-                        if *last_line_clone_for_mark_set.borrow() != (line as u32) || *last_col_clone_for_mark_set.borrow() != (col as u32) {
-                            status_bar_clone_for_mark_set_closure.borrow_mut().set_text(&format!("Linea {}, Colonna {}", line, col));
-                            *last_line_clone_for_mark_set.borrow_mut() = line as u32;
-                            *last_col_clone_for_mark_set.borrow_mut() = col as u32;
+                            if *last_line_clone_for_mark_set.borrow() != (line as u32)
+                                || *last_col_clone_for_mark_set.borrow() != (col as u32)
+                            {
+                                status_bar_clone_for_mark_set_closure
+                                    .borrow_mut()
+                                    .set_text(&format!("Line {}, Column {}", line, col));
+                                *last_line_clone_for_mark_set.borrow_mut() = line as u32;
+                                *last_col_clone_for_mark_set.borrow_mut() = col as u32;
+                            }
                         }
-                    }
 
-                    let text_view_for_idle = text_view_clone_for_mark_set.clone();
-                    let prev_bracket_pos1_clone_for_idle = prev_bracket_pos1_for_mark_set.clone();
-                let prev_bracket_pos2_clone_for_idle = prev_bracket_pos2_for_mark_set.clone();
-                glib::idle_add_local_once(move || {
-                    syntax_highlighting::update_bracket_highlighting(
-                        &text_view_for_idle,
-                        find_matching_bracket,
-                        &prev_bracket_pos1_clone_for_idle,
-                        &prev_bracket_pos2_clone_for_idle,
-                    );
-                });
+                        let text_view_for_idle = text_view_clone_for_mark_set.clone();
+                        let prev_bracket_pos1_clone_for_idle =
+                            prev_bracket_pos1_for_mark_set.clone();
+                        let prev_bracket_pos2_clone_for_idle =
+                            prev_bracket_pos2_for_mark_set.clone();
+                        glib::idle_add_local_once(move || {
+                            syntax_highlighting::update_bracket_highlighting(
+                                &text_view_for_idle,
+                                syntax_highlighting::find_matching_bracket,
+                                &prev_bracket_pos1_clone_for_idle,
+                                &prev_bracket_pos2_clone_for_idle,
+                            );
+                        });
 
-                    // Clear existing highlights
-                    buffer.remove_tag_by_name("document_highlight", &buffer.start_iter(), &buffer.end_iter());
-
-                });
+                        // Clear existing highlights
+                        buffer.remove_tag_by_name(
+                            "document_highlight",
+                            &buffer.start_iter(),
+                            &buffer.end_iter(),
+                        );
+                    },
+                );
 
                 // Connect to ScrolledWindow's adjustment value-changed for scrolling
                 if let Some(parent_widget) = text_view.parent() {
                     if let Some(parent_box) = parent_widget.downcast_ref::<gtk4::Box>() {
-                        if let Some(line_numbers_area) = parent_box.first_child().and_then(|w| w.downcast_ref::<gtk4::DrawingArea>().map(|w| w.clone())) {
-                            if let Some(scrolled_window) = line_numbers_area.next_sibling().and_then(|w| w.downcast_ref::<gtk4::ScrolledWindow>().map(|w| w.clone())) {
+                        if let Some(line_numbers_area) = parent_box
+                            .first_child()
+                            .and_then(|w| w.downcast_ref::<gtk4::DrawingArea>().map(|w| w.clone()))
+                        {
+                            if let Some(scrolled_window) =
+                                line_numbers_area.next_sibling().and_then(|w| {
+                                    w.downcast_ref::<gtk4::ScrolledWindow>().map(|w| w.clone())
+                                })
+                            {
                                 let text_view_clone_for_scroll = text_view.clone();
                                 let line_numbers_area_clone_for_scroll = line_numbers_area.clone();
-                                let prev_bracket_pos1_clone_for_scroll_conn = prev_bracket_pos1.clone();
-                                let prev_bracket_pos2_clone_for_scroll_conn = prev_bracket_pos2.clone();
-                                scrolled_window.vadjustment().connect_value_changed(move |_| {
-                                    syntax_highlighting::update_bracket_highlighting(
-                                        &text_view_clone_for_scroll,
-                                        find_matching_bracket,
-                                        &prev_bracket_pos1_clone_for_scroll_conn,
-                                        &prev_bracket_pos2_clone_for_scroll_conn,
-                                    );
-                                    line_numbers_area_clone_for_scroll.queue_draw();
-                                });
+                                let prev_bracket_pos1_clone_for_scroll_conn =
+                                    prev_bracket_pos1.clone();
+                                let prev_bracket_pos2_clone_for_scroll_conn =
+                                    prev_bracket_pos2.clone();
+                                scrolled_window
+                                    .vadjustment()
+                                    .connect_value_changed(move |_| {
+                                        syntax_highlighting::update_bracket_highlighting(
+                                            &text_view_clone_for_scroll,
+                                            syntax_highlighting::find_matching_bracket,
+                                            &prev_bracket_pos1_clone_for_scroll_conn,
+                                            &prev_bracket_pos2_clone_for_scroll_conn,
+                                        );
+                                        line_numbers_area_clone_for_scroll.queue_draw();
+                                    });
 
                                 // Connect to text_buffer's changed signal to update line numbers if text changes
                                 let line_numbers_area_clone_for_changed = line_numbers_area.clone();
@@ -315,9 +368,9 @@ impl AppState {
         bracket_match_tag.set_property("background-rgba", &yellow);
         bracket_match_tag.set_scale(1.3);
         bracket_match_tag.set_weight(700);
-        
+
         text_buffer.tag_table().add(&bracket_match_tag);
-        
+
         let text_view = TextView::builder()
             .buffer(&text_buffer)
             .hexpand(true)
@@ -329,13 +382,14 @@ impl AppState {
             .vscrollbar_policy(gtk4::PolicyType::Automatic)
             .child(&text_view)
             .build();
-        
+
         // Line numbers area
         let line_numbers_area = gtk4::DrawingArea::new();
         line_numbers_area.set_width_request(LINE_NUMBER_WIDTH);
         line_numbers_area.set_hexpand(false);
         line_numbers_area.set_vexpand(true);
-        line_numbers_area.clone().set_draw_func({ // Added .clone()
+        line_numbers_area.clone().set_draw_func({
+            // Added .clone()
             let text_view_clone = text_view.clone();
             let scrolled_window_clone = scrolled_window.clone();
             let current_font_desc_clone = current_font_desc.clone(); // Clone font description
@@ -358,12 +412,17 @@ impl AppState {
                 let max_line_number = buffer.line_count().max(1); // Get total lines, at least 1
                 let max_digits = max_line_number.to_string().len();
                 let test_string = "8".repeat(max_digits); // Use '8' as it's typically wide
-                let extents = cr.text_extents(&test_string).expect("Failed to get text extents");
+                let extents = cr
+                    .text_extents(&test_string)
+                    .expect("Failed to get text extents");
                 let required_width = extents.width() + LINE_NUMBER_PADDING * 2.0; // Add padding
 
                 // Update the width_request of the DrawingArea
                 // Only update if significantly different to avoid excessive redraws
-                if (line_numbers_area_clone_for_closure.width_request() as f64 - required_width).abs() > 1.0 {
+                if (line_numbers_area_clone_for_closure.width_request() as f64 - required_width)
+                    .abs()
+                    > 1.0
+                {
                     line_numbers_area_clone_for_closure.set_width_request(required_width as i32);
                 }
 
@@ -373,7 +432,8 @@ impl AppState {
                 // More accurate line height calculation using Pango
                 let pango_context = text_view.pango_context();
                 let font_metrics = pango_context.metrics(Some(&font_desc), None);
-                let line_height = (font_metrics.ascent() + font_metrics.descent()) as f64 / pango::SCALE as f64;
+                let line_height =
+                    (font_metrics.ascent() + font_metrics.descent()) as f64 / pango::SCALE as f64;
 
                 // Calculate visible lines range
                 let start_line = (scroll_y / line_height).floor() as i32;
@@ -393,7 +453,8 @@ impl AppState {
                         if display_y + line_height >= 0.0 && display_y <= height as f64 {
                             let line_number = line_num + 1;
                             let text = format!("{}", line_number);
-                            let extents = cr.text_extents(&text).expect("Failed to get text extents");
+                            let extents =
+                                cr.text_extents(&text).expect("Failed to get text extents");
                             let x = width as f64 - extents.width() - LINE_NUMBER_PADDING;
                             let y = display_y + (line_height / 2.0) + (extents.height() / 2.0);
 
@@ -408,8 +469,11 @@ impl AppState {
         let text_view_with_line_numbers_box = gtk4::Box::new(Orientation::Horizontal, 0);
         text_view_with_line_numbers_box.append(&line_numbers_area);
         text_view_with_line_numbers_box.append(&scrolled_window);
-        
-        notebook.append_page(&text_view_with_line_numbers_box, Some(&Label::new(Some("Untitled-1"))));
+
+        notebook.append_page(
+            &text_view_with_line_numbers_box,
+            Some(&Label::new(Some("Untitled-1"))),
+        );
 
         add_zoom_controllers_to_text_view(
             &text_view,
@@ -486,13 +550,16 @@ impl AppState {
         let initial_font_size_clone_tree_view = initial_font_size.clone();
         let setup_buffer_connections_clone_tree_view = setup_buffer_connections.clone();
         let app_settings_clone_tree_view = app_settings.clone();
-        
-        tree_view.connect_row_activated(move |_, tree_path, _| {
+
+        tree_view.connect_row_activated(move |_, tree_path, _column| {
             if let Some(iter) = tree_store_clone_tree_view.iter(tree_path) {
-                if let Ok(path_value) = tree_store_clone_tree_view.get_value(&iter, 1).get::<String>() {
+                if let Ok(path_value) = tree_store_clone_tree_view
+                    .get_value(&iter, 1)
+                    .get::<String>()
+                {
                     let path = PathBuf::from(path_value);
                     if path.is_file() {
-                        open_file_in_new_tab(
+                        tab_manager::open_file_in_new_tab(
                             &path,
                             &notebook_clone_tree_view,
                             &highlight_closure_clone_tree_view,
@@ -513,7 +580,7 @@ impl AppState {
                 }
             }
         });
-        
+
         vbox.append(&notebook);
         vbox.append(&*status_bar.borrow());
         main_paned.set_end_child(Some(&vbox));
@@ -528,17 +595,24 @@ impl AppState {
             let mut first_unsaved_buffer = None;
             let mut first_unsaved_file_path = None;
             let mut first_unsaved_page_index = 0;
-            
+
             for i in 0..notebook_clone_for_close.n_pages() {
                 if let Some(page) = notebook_clone_for_close.nth_page(Some(i)) {
-                    if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                        if let Some(scrolled_window) = text_view_with_line_numbers_box.last_child().and_then(|w| w.downcast::<ScrolledWindow>().ok()) {
-                            if let Some(text_view) = scrolled_window.child().and_then(|w| w.downcast::<TextView>().ok()) {
+                    if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>()
+                    {
+                        if let Some(scrolled_window) = text_view_with_line_numbers_box
+                            .last_child()
+                            .and_then(|w| w.downcast::<ScrolledWindow>().ok())
+                        {
+                            if let Some(text_view) = scrolled_window
+                                .child()
+                                .and_then(|w| w.downcast::<TextView>().ok())
+                            {
                                 let buffer = text_view.buffer();
                                 let buffer_paths_borrowed = buffer_paths_clone_for_close.borrow();
                                 let file_path = buffer_paths_borrowed.get(&buffer).cloned();
-                                
-                                if crate::actions::is_buffer_modified(&buffer, file_path.as_ref()) {
+
+                                if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
                                     has_unsaved_changes = true;
                                     first_unsaved_buffer = Some(buffer);
                                     first_unsaved_file_path = file_path;
@@ -550,15 +624,15 @@ impl AppState {
                     }
                 }
             }
-            
+
             if has_unsaved_changes {
                 if let Some(buffer) = first_unsaved_buffer {
                     let app_clone2 = app_clone_for_close.clone();
                     let buffer_paths_clone2 = buffer_paths_clone_for_close.clone();
                     let notebook_clone2 = notebook_clone_for_close.clone();
                     let window_clone2 = win.clone();
-                    
-                    crate::actions::prompt_save_changes_async(
+
+                    tab_manager::prompt_save_changes_async(
                         &window_clone2,
                         buffer,
                         first_unsaved_file_path,
@@ -571,15 +645,17 @@ impl AppState {
                                 app_clone2.quit();
                             }
                             // If not proceed, the user cancelled, so we don't exit
-                        }
+                        },
                     );
                     // Return glib::Propagation::Stop to prevent the window from closing immediately
                     return glib::Propagation::Stop;
                 }
             }
-            
+
             // No unsaved changes, exit immediately
-            win.application().expect("No application associated with window").quit();
+            win.application()
+                .expect("No application associated with window")
+                .quit();
             glib::Propagation::Proceed
         });
 
@@ -603,12 +679,10 @@ impl AppState {
             highlight_closure,
             line_numbers_area,
             syntax_highlight_timer,
-            prev_bracket_pos1,
-            prev_bracket_pos2,
         }))
     }
 }
-        
+
 fn main() -> glib::ExitCode {
     let app = Application::builder()
         .application_id("com.e4code.editor")
@@ -645,7 +719,7 @@ fn main() -> glib::ExitCode {
                 for file in files {
                     if let Some(path) = file.path() {
                         if path.is_file() {
-                            open_file_in_new_tab(
+                            tab_manager::open_file_in_new_tab(
                                 &path,
                                 &state_borrowed.notebook,
                                 &state_borrowed.highlight_closure,
@@ -672,6 +746,3 @@ fn main() -> glib::ExitCode {
 
     app.run_with_args(&env::args().collect::<Vec<_>>())
 }
-
-
-

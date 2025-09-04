@@ -1,11 +1,19 @@
-use gtk4::{Dialog, ResponseType, Orientation, Box, Label, Entry, CheckButton, Align};
 use gtk4::prelude::*;
+use gtk4::{Align, Box, CheckButton, Dialog, Entry, Label, Orientation, ResponseType};
 
 /// Creates a search and replace dialog
 pub fn create_search_replace_dialog(
     parent: &impl IsA<gtk4::Window>,
     initial_text: &str,
-) -> (Dialog, Entry, Entry, CheckButton, CheckButton, CheckButton, Label) {
+) -> (
+    Dialog,
+    Entry,
+    Entry,
+    CheckButton,
+    CheckButton,
+    CheckButton,
+    Label,
+) {
     let dialog = Dialog::builder()
         .title("Search and Replace")
         .transient_for(parent)
@@ -28,10 +36,7 @@ pub fn create_search_replace_dialog(
     // Search term entry
     let search_hbox = Box::new(Orientation::Horizontal, 10);
     let search_label = Label::new(Some("Find what:"));
-    let search_entry = Entry::builder()
-        .text(initial_text)
-        .hexpand(true)
-        .build();
+    let search_entry = Entry::builder().text(initial_text).hexpand(true).build();
     search_hbox.append(&search_label);
     search_hbox.append(&search_entry);
     vbox.append(&search_hbox);
@@ -39,9 +44,7 @@ pub fn create_search_replace_dialog(
     // Replace term entry
     let replace_hbox = Box::new(Orientation::Horizontal, 10);
     let replace_label = Label::new(Some("Replace with:"));
-    let replace_entry = Entry::builder()
-        .hexpand(true)
-        .build();
+    let replace_entry = Entry::builder().hexpand(true).build();
     replace_hbox.append(&replace_label);
     replace_hbox.append(&replace_entry);
     vbox.append(&replace_hbox);
@@ -63,5 +66,13 @@ pub fn create_search_replace_dialog(
 
     content_area.append(&vbox);
 
-    (dialog, search_entry, replace_entry, match_case_cb, whole_word_cb, regex_cb, status_label)
+    (
+        dialog,
+        search_entry,
+        replace_entry,
+        match_case_cb,
+        whole_word_cb,
+        regex_cb,
+        status_label,
+    )
 }
