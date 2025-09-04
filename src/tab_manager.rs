@@ -536,3 +536,33 @@ pub fn close_all_tabs_with_prompts(
     // Start processing the buffers
     process_next_buffer(window, notebook, buffer_paths, buffers_to_check);
 }
+
+pub fn get_open_file_paths(
+    notebook: &Notebook,
+    buffer_paths: &Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
+) -> Vec<PathBuf> {
+    let mut open_paths = Vec::new();
+    let buffer_paths_borrowed = buffer_paths.borrow();
+
+    for i in 0..notebook.n_pages() {
+        if let Some(page) = notebook.nth_page(Some(i)) {
+            if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
+                if let Some(scrolled_window) = text_view_with_line_numbers_box
+                    .last_child()
+                    .and_then(|w| w.downcast::<ScrolledWindow>().ok())
+                {
+                    if let Some(text_view) = scrolled_window
+                        .child()
+                        .and_then(|w| w.downcast::<TextView>().ok())
+                    {
+                        let buffer = text_view.buffer();
+                        if let Some(path) = buffer_paths_borrowed.get(&buffer) {
+                            open_paths.push(path.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    open_paths
+}

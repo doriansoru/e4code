@@ -9,13 +9,12 @@ mod utils;
 
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box, DrawingArea, HeaderBar, Label, MenuButton, Notebook,
+    Application, ApplicationWindow, Box, HeaderBar, Label, MenuButton, Notebook,
     Orientation, Paned, PopoverMenu, ScrolledWindow, Settings, TextBuffer, TextIter, TextMark,
     TextView, TreeStore, TreeView,
 };
 use std::collections::HashMap;
 
-use gtk4::gdk;
 use gtk4::pango;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
@@ -29,10 +28,8 @@ use actions::{open_directory_in_tree, setup_actions};
 use settings::{AppSettings, load_settings, save_settings};
 
 use file_operations::populate_tree_view;
-use utils::add_zoom_controllers_to_text_view;
 
 use gio::{self};
-use ui::components::{LINE_NUMBER_PADDING, LINE_NUMBER_WIDTH};
 
 // Struct to contain application state
 struct AppState {
@@ -53,7 +50,6 @@ struct AppState {
     notebook: Notebook,
     window: ApplicationWindow,
     highlight_closure: Rc<dyn Fn(TextBuffer)>,
-    line_numbers_area: DrawingArea,
     syntax_highlight_timer: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
@@ -356,135 +352,7 @@ impl AppState {
             })
         };
 
-        // --- Initial Buffer ---
-        let text_buffer = TextBuffer::builder().text("").build();
-        // Add highlight tag to the initial buffer's tag table
-        let highlight_tag = gtk4::TextTag::new(Some("document_highlight"));
-        highlight_tag.set_background_rgba(Some(&gtk4::gdk::RGBA::new(0.0, 0.0, 1.0, 0.3))); // Blue with some transparency
-        text_buffer.tag_table().add(&highlight_tag);
-        // Add bracket_match tag to initial buffer
-        let bracket_match_tag = gtk4::TextTag::new(Some("bracket_match"));
-        let yellow = gdk::RGBA::new(1.0f32, 1.0f32, 0.0f32, 0.5f32);
-        bracket_match_tag.set_property("background-rgba", &yellow);
-        bracket_match_tag.set_scale(1.3);
-        bracket_match_tag.set_weight(700);
-
-        text_buffer.tag_table().add(&bracket_match_tag);
-
-        let text_view = TextView::builder()
-            .buffer(&text_buffer)
-            .hexpand(true)
-            .vexpand(true)
-            .build();
-
-        let scrolled_window = ScrolledWindow::builder()
-            .hscrollbar_policy(gtk4::PolicyType::Automatic)
-            .vscrollbar_policy(gtk4::PolicyType::Automatic)
-            .child(&text_view)
-            .build();
-
-        // Line numbers area
-        let line_numbers_area = gtk4::DrawingArea::new();
-        line_numbers_area.set_width_request(LINE_NUMBER_WIDTH);
-        line_numbers_area.set_hexpand(false);
-        line_numbers_area.set_vexpand(true);
-        line_numbers_area.clone().set_draw_func({
-            // Added .clone()
-            let text_view_clone = text_view.clone();
-            let scrolled_window_clone = scrolled_window.clone();
-            let current_font_desc_clone = current_font_desc.clone(); // Clone font description
-            let line_numbers_area_clone_for_closure = line_numbers_area.clone(); // Clone for use inside closure
-            move |_, cr, width, height| {
-                let text_view = text_view_clone.clone();
-                let vadjustment = scrolled_window_clone.vadjustment();
-                let font_desc = current_font_desc_clone.borrow(); // Borrow font description
-                let font_size_pts = font_desc.size() as f64 / pango::SCALE as f64; // Get font size in points
-
-                cr.set_source_rgb(0.95, 0.95, 0.95); // Light gray background
-                cr.paint().expect("Failed to paint background");
-
-                cr.set_source_rgb(0.2, 0.2, 0.2); // Dark gray for text
-                let buffer = text_view.buffer(); // Get buffer from text_view (moved to top)
-
-                cr.set_font_size(font_size_pts); // Use dynamic font size
-
-                // Calculate dynamic width for line numbers area
-                let max_line_number = buffer.line_count().max(1); // Get total lines, at least 1
-                let max_digits = max_line_number.to_string().len();
-                let test_string = "8".repeat(max_digits); // Use '8' as it's typically wide
-                let extents = cr
-                    .text_extents(&test_string)
-                    .expect("Failed to get text extents");
-                let required_width = extents.width() + LINE_NUMBER_PADDING * 2.0; // Add padding
-
-                // Update the width_request of the DrawingArea
-                // Only update if significantly different to avoid excessive redraws
-                if (line_numbers_area_clone_for_closure.width_request() as f64 - required_width)
-                    .abs()
-                    > 1.0
-                {
-                    line_numbers_area_clone_for_closure.set_width_request(required_width as i32);
-                }
-
-                let scroll_y = vadjustment.value();
-                let allocation_height = text_view.allocation().height() as f64;
-
-                // More accurate line height calculation using Pango
-                let pango_context = text_view.pango_context();
-                let font_metrics = pango_context.metrics(Some(&font_desc), None);
-                let line_height =
-                    (font_metrics.ascent() + font_metrics.descent()) as f64 / pango::SCALE as f64;
-
-                // Calculate visible lines range
-                let start_line = (scroll_y / line_height).floor() as i32;
-                let end_line = ((scroll_y + allocation_height) / line_height).ceil() as i32 + 1; // +1 for safety
-
-                // Ensure we don't go out of bounds
-                let start_line = start_line.max(0);
-                let end_line = end_line.min(buffer.line_count().max(1));
-
-                // Draw line numbers for visible lines
-                for line_num in start_line..end_line {
-                    if let Some(iter) = buffer.iter_at_line(line_num) {
-                        let (line_y_start, _) = text_view.line_yrange(&iter);
-                        let display_y = line_y_start as f64 - scroll_y;
-
-                        // Only draw if the line is visible
-                        if display_y + line_height >= 0.0 && display_y <= height as f64 {
-                            let line_number = line_num + 1;
-                            let text = format!("{}", line_number);
-                            let extents =
-                                cr.text_extents(&text).expect("Failed to get text extents");
-                            let x = width as f64 - extents.width() - LINE_NUMBER_PADDING;
-                            let y = display_y + (line_height / 2.0) + (extents.height() / 2.0);
-
-                            cr.move_to(x, y);
-                            cr.show_text(&text).expect("Failed to draw text");
-                        }
-                    }
-                }
-            }
-        });
-
-        let text_view_with_line_numbers_box = gtk4::Box::new(Orientation::Horizontal, 0);
-        text_view_with_line_numbers_box.append(&line_numbers_area);
-        text_view_with_line_numbers_box.append(&scrolled_window);
-
-        notebook.append_page(
-            &text_view_with_line_numbers_box,
-            Some(&Label::new(Some("Untitled-1"))),
-        );
-
-        add_zoom_controllers_to_text_view(
-            &text_view,
-            current_font_desc.clone(),
-            update_font.clone(),
-            app.clone(),
-            initial_font_size.clone(),
-        );
-
-        setup_buffer_connections(&text_buffer, &text_view);
-        highlight_closure(text_buffer.clone());
+        
 
         // --- Menu and Action Setup ---
         let file_menu_button = MenuButton::builder().label("File").build();
@@ -589,7 +457,16 @@ impl AppState {
         let app_clone_for_close = app.clone();
         let notebook_clone_for_close = notebook.clone();
         let buffer_paths_clone_for_close = buffer_paths.clone();
+        let app_settings_clone_for_close = app_settings.clone(); // Clone app_settings
         window.connect_close_request(move |win| {
+            // Get currently open files and save them to settings
+            let open_files = tab_manager::get_open_file_paths(
+                &notebook_clone_for_close,
+                &buffer_paths_clone_for_close,
+            );
+            app_settings_clone_for_close.borrow_mut().last_opened_files = Some(open_files);
+            save_settings(&app_settings_clone_for_close.borrow());
+
             // Check if any files have unsaved changes
             let mut has_unsaved_changes = false;
             let mut first_unsaved_buffer = None;
@@ -677,7 +554,7 @@ impl AppState {
             notebook,
             window,
             highlight_closure,
-            line_numbers_area,
+            
             syntax_highlight_timer,
         }))
     }
@@ -697,7 +574,43 @@ fn main() -> glib::ExitCode {
         move |app: &Application| {
             // Create AppState only if it hasn't been created by connect_open
             if app_state.borrow().is_none() {
-                *app_state.borrow_mut() = Some(AppState::new(app));
+                let new_state = AppState::new(app);
+                let mut opened_any_file = false;
+                // If no files were opened via command line, open last opened files
+                if new_state.borrow().app_settings.borrow().last_opened_files.is_some() {
+                    if let Some(files_to_open) = new_state.borrow().app_settings.borrow().last_opened_files.clone() {
+                        for path in files_to_open {
+                            if path.is_file() {
+                                tab_manager::open_file_in_new_tab(
+                                    &path,
+                                    &new_state.borrow().notebook,
+                                    &new_state.borrow().highlight_closure,
+                                    &new_state.borrow().buffer_paths,
+                                    app,
+                                    &new_state.borrow().current_font_desc,
+                                    &new_state.borrow().update_font,
+                                    &new_state.borrow().initial_font_size,
+                                    &new_state.borrow().setup_buffer_connections,
+                                );
+                                opened_any_file = true;
+                            }
+                        }
+                    }
+                }
+                // If no files were opened (neither from command line nor from settings), create a new untitled tab
+                if !opened_any_file {
+                    tab_manager::create_new_file_tab(
+                        &new_state.borrow().notebook,
+                        &new_state.borrow().highlight_closure,
+                        &new_state.borrow().buffer_paths,
+                        app,
+                        &new_state.borrow().current_font_desc,
+                        &new_state.borrow().update_font,
+                        &new_state.borrow().initial_font_size,
+                        &new_state.borrow().setup_buffer_connections,
+                    );
+                }
+                *app_state.borrow_mut() = Some(new_state);
             }
             // Present the window
             if let Some(state) = app_state.borrow().as_ref() {

@@ -9,6 +9,7 @@ pub struct AppSettings {
     pub theme: String,
     pub font: String,
     pub last_opened_directory: Option<PathBuf>,
+    pub last_opened_files: Option<Vec<PathBuf>>,
 }
 
 impl Default for AppSettings {
@@ -17,6 +18,7 @@ impl Default for AppSettings {
             theme: "dark".to_string(),
             font: format!("Monospace {}", DEFAULT_FONT_SIZE),
             last_opened_directory: None,
+            last_opened_files: None,
         }
     }
 }
