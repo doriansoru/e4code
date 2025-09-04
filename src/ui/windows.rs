@@ -55,8 +55,8 @@ pub fn create_about_dialog(parent: &impl IsA<gtk4::Window>) -> AboutDialog {
         .program_name("E4Code")
         .version("0.1.0")
         .comments("A lightweight code editor built with Rust and GTK4.")
-        .website("https://github.com/e4code/e4code") // Changed to a more specific placeholder
-        .authors(vec!["The E4Code Developers".to_string()]) // Changed to English
+        .website("https://github.com/doriansoru/e4code") // Changed to a more specific placeholder
+        .authors(vec!["Dorian Soru".to_string(), "Enzo Battero Productions".to_string()]) // Changed to English
         .build();
     dialog
 }
