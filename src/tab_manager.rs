@@ -34,24 +34,10 @@ pub fn open_file_in_new_tab(
                 // File is already open, switch to its tab
                 for i in 0..notebook.n_pages() {
                     if let Some(page) = notebook.nth_page(Some(i)) {
-                        // The actual structure is: Box (line_numbers_area + ScrolledWindow (TextView))
-                        if let Some(text_view_with_line_numbers_box) =
-                            page.downcast_ref::<gtk4::Box>()
-                        {
-                            // Get the second child which should be the ScrolledWindow
-                            if let Some(scrolled_window) = text_view_with_line_numbers_box
-                                .last_child()
-                                .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                            {
-                                if let Some(text_view) = scrolled_window
-                                    .child()
-                                    .and_then(|w| w.downcast::<TextView>().ok())
-                                {
-                                    if text_view.buffer() == *buffer {
-                                        notebook.set_current_page(Some(i));
-                                        return; // Exit the function as we've switched to the existing tab
-                                    }
-                                }
+                        if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                            if text_view.buffer() == *buffer {
+                                notebook.set_current_page(Some(i));
+                                return; // Exit the function as we've switched to the existing tab
                             }
                         }
                     }
@@ -64,15 +50,8 @@ pub fn open_file_in_new_tab(
     match std::fs::read_to_string(&path) {
         Ok(content) => {
             let new_buffer = gtk4::TextBuffer::builder().text(&content).build();
-            // Add the highlight tag to the new buffer's tag table
-            let highlight_tag = gtk4::TextTag::new(Some("document_highlight"));
-            highlight_tag.set_background_rgba(Some(&gtk4::gdk::RGBA::new(0.0, 0.0, 1.0, 0.3)));
-            new_buffer.tag_table().add(&highlight_tag);
-            // Add bracket_match tag
-            let bracket_match_tag = gtk4::TextTag::new(Some("bracket_match"));
-            bracket_match_tag.set_weight(700);
-            bracket_match_tag.set_scale(1.3);
-            new_buffer.tag_table().add(&bracket_match_tag);
+            // Setup standard buffer tags
+            crate::buffer_tags::setup_buffer_tags(&new_buffer);
 
             // Now it's safe to mutably borrow buffer_paths
             buffer_paths
@@ -180,17 +159,8 @@ pub fn create_new_file_tab(
 ) {
     // Create a new empty buffer
     let new_buffer = gtk4::TextBuffer::builder().text("").build();
-
-    // Add the highlight tag to the new buffer's tag table
-    let highlight_tag = gtk4::TextTag::new(Some("document_highlight"));
-    highlight_tag.set_background_rgba(Some(&gtk4::gdk::RGBA::new(0.0, 0.0, 1.0, 0.3)));
-    new_buffer.tag_table().add(&highlight_tag);
-
-    // Add bracket_match tag
-    let bracket_match_tag = gtk4::TextTag::new(Some("bracket_match"));
-    bracket_match_tag.set_weight(700);
-    bracket_match_tag.set_scale(1.3);
-    new_buffer.tag_table().add(&bracket_match_tag);
+    // Setup standard buffer tags
+    crate::buffer_tags::setup_buffer_tags(&new_buffer);
 
     let new_text_view = gtk4::TextView::builder()
         .buffer(&new_buffer)
@@ -290,20 +260,8 @@ pub fn create_new_file_tab(
     highlight_closure(new_buffer.clone());
 }
 
-/// Checks if a buffer has been modified compared to its file on disk
 pub fn is_buffer_modified(buffer: &TextBuffer, file_path: Option<&PathBuf>) -> bool {
-    if let Some(path) = file_path {
-        if let Ok(content_on_disk) = std::fs::read_to_string(path) {
-            let buffer_content = buffer
-                .text(&buffer.start_iter(), &buffer.end_iter(), false)
-                .to_string();
-            return buffer_content != content_on_disk;
-        }
-    }
-    // If file doesn't exist on disk or can't be read, consider it modified if it has content
-    let start = buffer.start_iter();
-    let end = buffer.end_iter();
-    !buffer.text(&start, &end, false).is_empty()
+    crate::file_operations::is_buffer_modified(buffer, file_path)
 }
 
 /// Prompts the user to save changes before closing a file
@@ -347,17 +305,11 @@ pub fn prompt_save_changes_async<F>(
                     if let Err(e) = save_buffer_to_file(&parent_clone, &buffer_clone, path) {
                         eprintln!("Error saving file: {}", e);
                         // Show error dialog
-                        let error_dialog = gtk4::MessageDialog::builder()
-                            .transient_for(&parent_clone)
-                            .modal(true)
-                            .buttons(gtk4::ButtonsType::Ok)
-                            .text("Error saving file")
-                            .secondary_text(&format!("Could not save file: {}", e))
-                            .build();
-                        error_dialog.connect_response(|dialog, _| {
-                            dialog.close();
-                        });
-                        error_dialog.present();
+                        crate::dialogs::show_error_dialog(
+                            &parent_clone,
+                            "Error saving file",
+                            &format!("Could not save file: {}", e)
+                        );
                         dialog.close();
                         if let Some(callback) = callback {
                             callback(false); // Don't proceed
@@ -446,36 +398,26 @@ pub fn close_tab(
     page_num: u32,
 ) {
     if let Some(page) = notebook.nth_page(Some(page_num)) {
-        if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-            if let Some(scrolled_window) = text_view_with_line_numbers_box
-                .last_child()
-                .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-            {
-                if let Some(text_view) = scrolled_window
-                    .child()
-                    .and_then(|w| w.downcast::<TextView>().ok())
-                {
-                    let buffer = text_view.buffer();
-                    let buffer_paths_borrowed = buffer_paths.borrow();
-                    let file_path = buffer_paths_borrowed.get(&buffer).cloned();
+        if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+            let buffer = text_view.buffer();
+            let buffer_paths_borrowed = buffer_paths.borrow();
+            let file_path = buffer_paths_borrowed.get(&buffer).cloned();
 
-                    if is_buffer_modified(&buffer, file_path.as_ref()) {
-                        drop(buffer_paths_borrowed);
-                        prompt_save_changes_async(
-                            window,
-                            buffer,
-                            file_path,
-                            buffer_paths.clone(),
-                            notebook.clone(),
-                            page_num,
-                            |_proceed| {},
-                        );
-                    } else {
-                        drop(buffer_paths_borrowed);
-                        buffer_paths.borrow_mut().remove(&buffer);
-                        notebook.remove_page(Some(page_num));
-                    }
-                }
+            if is_buffer_modified(&buffer, file_path.as_ref()) {
+                drop(buffer_paths_borrowed);
+                prompt_save_changes_async(
+                    window,
+                    buffer,
+                    file_path,
+                    buffer_paths.clone(),
+                    notebook.clone(),
+                    page_num,
+                    |_proceed| {},
+                );
+            } else {
+                drop(buffer_paths_borrowed);
+                buffer_paths.borrow_mut().remove(&buffer);
+                notebook.remove_page(Some(page_num));
             }
         }
     }
@@ -504,25 +446,15 @@ pub fn close_all_tabs_with_prompts(
     // Collect all buffers and their paths, but only if they are modified
     for i in 0..notebook.n_pages() {
         if let Some(page) = notebook.nth_page(Some(i)) {
-            if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                if let Some(scrolled_window) = text_view_with_line_numbers_box
-                    .last_child()
-                    .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                {
-                    if let Some(text_view) = scrolled_window
-                        .child()
-                        .and_then(|w| w.downcast::<TextView>().ok())
-                    {
-                        let buffer = text_view.buffer();
-                        let buffer_paths_borrowed = buffer_paths.borrow();
-                        let file_path = buffer_paths_borrowed.get(&buffer).cloned();
-                        drop(buffer_paths_borrowed); // Release the borrow
+            if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                let buffer = text_view.buffer();
+                let buffer_paths_borrowed = buffer_paths.borrow();
+                let file_path = buffer_paths_borrowed.get(&buffer).cloned();
+                drop(buffer_paths_borrowed); // Release the borrow
 
-                        // Only add to check list if actually modified
-                        if is_buffer_modified(&buffer, file_path.as_ref()) {
-                            buffers_to_check.push((buffer, file_path, i));
-                        }
-                    }
+                // Only add to check list if actually modified
+                if is_buffer_modified(&buffer, file_path.as_ref()) {
+                    buffers_to_check.push((buffer, file_path, i));
                 }
             }
         }
@@ -586,20 +518,10 @@ pub fn get_open_file_paths(
 
     for i in 0..notebook.n_pages() {
         if let Some(page) = notebook.nth_page(Some(i)) {
-            if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                if let Some(scrolled_window) = text_view_with_line_numbers_box
-                    .last_child()
-                    .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                {
-                    if let Some(text_view) = scrolled_window
-                        .child()
-                        .and_then(|w| w.downcast::<TextView>().ok())
-                    {
-                        let buffer = text_view.buffer();
-                        if let Some(path) = buffer_paths_borrowed.get(&buffer) {
-                            open_paths.push(path.clone());
-                        }
-                    }
+            if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                let buffer = text_view.buffer();
+                if let Some(path) = buffer_paths_borrowed.get(&buffer) {
+                    open_paths.push(path.clone());
                 }
             }
         }

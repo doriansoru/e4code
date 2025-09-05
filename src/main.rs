@@ -1,4 +1,7 @@
 mod actions;
+mod buffer_tags;
+mod clipboard;
+mod dialogs;
 mod file_operations;
 mod indentation;
 pub mod search;
@@ -351,10 +354,10 @@ impl AppContext {
         file_menu_model.append(Some("New"), Some("app.new"));
         file_menu_model.append(Some("Open"), Some("app.open"));
         file_menu_model.append(Some("Open directory"), Some("app.open_directory"));
-        file_menu_model.append(Some("Close this file"), Some("app.close_current_file"));
-        file_menu_model.append(Some("Close all files"), Some("app.close_all_files"));
         file_menu_model.append(Some("Save"), Some("app.save"));
         file_menu_model.append(Some("Save as"), Some("app.save_as"));
+        file_menu_model.append(Some("Close this file"), Some("app.close_current_file"));
+        file_menu_model.append(Some("Close all files"), Some("app.close_all_files"));
         file_menu_model.append(Some("Exit"), Some("app.quit"));
         let file_popover = PopoverMenu::from_model(Some(&file_menu_model));
         file_menu_button.set_popover(Some(&file_popover));
@@ -368,10 +371,16 @@ impl AppContext {
         edit_menu_model.append(Some("Paste"), Some("app.paste"));
         edit_menu_model.append(Some("Indent"), Some("app.indent"));
         edit_menu_model.append(Some("Outdent"), Some("app.outdent"));
-        edit_menu_model.append(Some("Settings"), Some("app.settings"));
         let edit_popover = PopoverMenu::from_model(Some(&edit_menu_model));
         edit_menu_button.set_popover(Some(&edit_popover));
         header_bar.pack_start(&edit_menu_button);
+
+        let settings_menu_button = MenuButton::builder().label("Settings").build();
+        let settings_menu_model = gio::Menu::new();
+        settings_menu_model.append(Some("Preferences"), Some("app.settings"));
+        let settings_popover = PopoverMenu::from_model(Some(&settings_menu_model));
+        settings_menu_button.set_popover(Some(&settings_popover));
+        header_bar.pack_start(&settings_menu_button);
 
         let help_menu_button = MenuButton::builder().label("?").build();
         let help_menu_model = gio::Menu::new();

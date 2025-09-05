@@ -7,32 +7,26 @@ This editor will have the following functions:
 ### File
 
 *   **New**
-
 *   **Open**
-
 *   **Open directory**
-
-*   **Close this file**
-
-*   **Close all files**
-
 *   **Save**
-
 *   **Save as**
-
+*   **Close this file**
+*   **Close all files**
 *   **Exit**
 
 ### Edit
 
 *   Search and replace (with regex support)
-
 *   Cut
-
 *   Copy
-
 *   Paste
+*   Indent
+*   Outdent
 
-*   Settings (dark or light theme; font and size in the UI)
+### Settings
+
+*   Preferences (dark or light theme; font and size in the UI)
 
 ### ?
 

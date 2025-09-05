@@ -2,10 +2,7 @@ use std::path::PathBuf;
 
 use gtk4::prelude::TextViewExt;
 use gtk4::prelude::*;
-use gtk4::{
-    Notebook, ResponseType, ScrolledWindow, Settings,
-    TextView,
-};
+use gtk4::{ResponseType, Settings};
 
 use gio::SimpleAction;
 use std::cell::RefCell;
@@ -39,85 +36,51 @@ pub fn setup_actions(
     let context = app_context.borrow();
 
     let app = &context.app;
-    fn get_current_text_view(notebook: &Notebook) -> Option<TextView> {
-        if let Some(current_page) = notebook.current_page() {
-            if let Some(page) = notebook.nth_page(Some(current_page)) {
-                // The actual structure is: Box (line_numbers_area + ScrolledWindow (TextView))
-                if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                    if let Some(scrolled_window) = text_view_with_line_numbers_box
-                        .last_child()
-                        .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                    {
-                        if let Some(text_view) = scrolled_window
-                            .child()
-                            .and_then(|w| w.downcast::<TextView>().ok())
-                        {
-                            return Some(text_view.clone());
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
+    
 
     let new_action = SimpleAction::new("new", None);
     let app_context_clone_new = app_context.clone();
     new_action.connect_activate(move |_, _| {
         let context = app_context_clone_new.borrow();
         // Check if current file needs saving
-        if let Some(current_page) = context.notebook.current_page() {
-            if let Some(page) = context.notebook.nth_page(Some(current_page)) {
-                if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                    if let Some(scrolled_window) = text_view_with_line_numbers_box
-                        .last_child()
-                        .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                    {
-                        if let Some(text_view) = scrolled_window
-                            .child()
-                            .and_then(|w| w.downcast::<TextView>().ok())
-                        {
-                            let buffer = text_view.buffer();
-                            let buffer_paths_borrowed = context.buffer_paths.borrow();
-                            let file_path = buffer_paths_borrowed.get(&buffer).cloned();
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
+            let buffer = text_view.buffer();
+            let buffer_paths_borrowed = context.buffer_paths.borrow();
+            let file_path = buffer_paths_borrowed.get(&buffer).cloned();
 
-                            if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
-                                // Drop the borrow before showing dialog
-                                drop(buffer_paths_borrowed);
+            if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
+                // Drop the borrow before showing dialog
+                drop(buffer_paths_borrowed);
 
-                                let app_context_clone_for_prompt = app_context_clone_new.clone();
-                                // Show save prompt asynchronously
-                                tab_manager::prompt_save_changes_async(
-                                    &context.window,
-                                    buffer,
-                                    file_path,
-                                    context.buffer_paths.clone(),
-                                    context.notebook.clone(),
-                                    current_page,
-                                    move |proceed| {
-                                        if proceed {
-                                            let context_for_tab = app_context_clone_for_prompt.borrow();
-                                            // Create new file tab
-                                            tab_manager::create_new_file_tab(
-                                                &context_for_tab.notebook,
-                                                &context_for_tab.highlight_closure,
-                                                &context_for_tab.buffer_paths,
-                                                &context_for_tab.app,
-                                                &context_for_tab.current_font_desc,
-                                                &context_for_tab.update_font,
-                                                &context_for_tab.initial_font_size,
-                                                &context_for_tab.setup_buffer_connections,
-                                            );
-                                        }
-                                    },
-                                );
-
-                                // Return early since we're handling this asynchronously
-                                return;
-                            }
+                let app_context_clone_for_prompt = app_context_clone_new.clone();
+                // Show save prompt asynchronously
+                tab_manager::prompt_save_changes_async(
+                    &context.window,
+                    buffer,
+                    file_path,
+                    context.buffer_paths.clone(),
+                    context.notebook.clone(),
+                    context.notebook.current_page().unwrap_or(0), // Get current page index
+                    move |proceed| {
+                        if proceed {
+                            let context_for_tab = app_context_clone_for_prompt.borrow();
+                            // Create new file tab
+                            tab_manager::create_new_file_tab(
+                                &context_for_tab.notebook,
+                                &context_for_tab.highlight_closure,
+                                &context_for_tab.buffer_paths,
+                                &context_for_tab.app,
+                                &context_for_tab.current_font_desc,
+                                &context_for_tab.update_font,
+                                &context_for_tab.initial_font_size,
+                                &context_for_tab.setup_buffer_connections,
+                            );
                         }
-                    }
-                }
+                    },
+                );
+
+                // Return early since we're handling this asynchronously
+                return;
             }
         }
 
@@ -139,59 +102,45 @@ pub fn setup_actions(
     open_action.connect_activate(move |_, _| {
         let context = app_context_clone_open.borrow();
         // Check if current file needs saving
-        if let Some(current_page) = context.notebook.current_page() {
-            if let Some(page) = context.notebook.nth_page(Some(current_page)) {
-                if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                    if let Some(scrolled_window) = text_view_with_line_numbers_box
-                        .last_child()
-                        .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                    {
-                        if let Some(text_view) = scrolled_window
-                            .child()
-                            .and_then(|w| w.downcast::<TextView>().ok())
-                        {
-                            let buffer = text_view.buffer();
-                            let buffer_paths_borrowed = context.buffer_paths.borrow();
-                            let file_path = buffer_paths_borrowed.get(&buffer).cloned();
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
+            let buffer = text_view.buffer();
+            let buffer_paths_borrowed = context.buffer_paths.borrow();
+            let file_path = buffer_paths_borrowed.get(&buffer).cloned();
 
-                            if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
-                                // Drop the borrow before showing dialog
-                                drop(buffer_paths_borrowed);
+            if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
+                // Drop the borrow before showing dialog
+                drop(buffer_paths_borrowed);
 
-                                let app_context_clone_for_prompt = app_context_clone_open.clone();
-                                // Show save prompt asynchronously
-                                tab_manager::prompt_save_changes_async(
-                                    &context.window,
-                                    buffer,
-                                    file_path,
-                                    context.buffer_paths.clone(),
-                                    context.notebook.clone(),
-                                    current_page,
-                                    move |proceed| {
-                                        if proceed {
-                                            let context_for_dialog = app_context_clone_for_prompt.borrow();
-                                            // Open file dialog
-                                            open_file_dialog(
-                                                &context_for_dialog.window,
-                                                context_for_dialog.notebook.clone(),
-                                                context_for_dialog.highlight_closure.clone(),
-                                                context_for_dialog.buffer_paths.clone(),
-                                                context_for_dialog.app.clone(),
-                                                context_for_dialog.current_font_desc.clone(),
-                                                context_for_dialog.update_font.clone(),
-                                                context_for_dialog.initial_font_size.clone(),
-                                                context_for_dialog.setup_buffer_connections.clone(),
-                                            );
-                                        }
-                                    },
-                                );
-
-                                // Return early since we're handling this asynchronously
-                                return;
-                            }
+                let app_context_clone_for_prompt = app_context_clone_open.clone();
+                // Show save prompt asynchronously
+                tab_manager::prompt_save_changes_async(
+                    &context.window,
+                    buffer,
+                    file_path,
+                    context.buffer_paths.clone(),
+                    context.notebook.clone(),
+                    context.notebook.current_page().unwrap_or(0), // Get current page index
+                    move |proceed| {
+                        if proceed {
+                            let context_for_dialog = app_context_clone_for_prompt.borrow();
+                            // Open file dialog
+                            open_file_dialog(
+                                &context_for_dialog.window,
+                                context_for_dialog.notebook.clone(),
+                                context_for_dialog.highlight_closure.clone(),
+                                context_for_dialog.buffer_paths.clone(),
+                                context_for_dialog.app.clone(),
+                                context_for_dialog.current_font_desc.clone(),
+                                context_for_dialog.update_font.clone(),
+                                context_for_dialog.initial_font_size.clone(),
+                                context_for_dialog.setup_buffer_connections.clone(),
+                            );
                         }
-                    }
-                }
+                    },
+                );
+
+                // Return early since we're handling this asynchronously
+                return;
             }
         }
 
@@ -248,54 +197,35 @@ pub fn setup_actions(
     let app_context_clone_save = app_context.clone();
     save_action.connect_activate(move |_, _| {
         let context = app_context_clone_save.borrow();
-        if let Some(current_page) = context.notebook.current_page() {
-            if let Some(page) = context.notebook.nth_page(Some(current_page)) {
-                if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                    if let Some(scrolled_window) = text_view_with_line_numbers_box
-                        .last_child()
-                        .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                    {
-                        if let Some(text_view) = scrolled_window
-                            .child()
-                            .and_then(|w| w.downcast::<TextView>().ok())
-                        {
-                            let buffer = text_view.buffer();
-                            let buffer_paths_borrowed = context.buffer_paths.borrow();
-                            let file_path = buffer_paths_borrowed.get(&buffer);
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
+            let buffer = text_view.buffer();
+            let buffer_paths_borrowed = context.buffer_paths.borrow();
+            let file_path = buffer_paths_borrowed.get(&buffer);
 
-                            if let Some(path) = file_path {
-                                // Save to existing file
-                                if let Err(e) = tab_manager::save_buffer_to_file(
-                                    &context.window,
-                                    &buffer,
-                                    path,
-                                ) {
-                                    eprintln!("Error saving file: {}", e);
-                                    // Show error dialog
-                                    let dialog = gtk4::MessageDialog::builder()
-                                        .transient_for(&context.window)
-                                        .modal(true)
-                                        .buttons(gtk4::ButtonsType::Ok)
-                                        .text("Error saving file")
-                                        .secondary_text(&format!("Could not save file: {}", e))
-                                        .build();
-                                    dialog.run_async(|dialog, _| {
-                                        dialog.close();
-                                    });
-                                }
-                            } else {
-                                // Need to save as - open save dialog
-                                drop(buffer_paths_borrowed); // Drop borrow before calling save_file_dialog
-                                crate::file_operations::save_file_dialog(
-                                    &context.window,
-                                    buffer,
-                                    context.buffer_paths.clone(),
-                                    Some(context.notebook.clone()),
-                                );
-                            }
-                        }
-                    }
+            if let Some(path) = file_path {
+                // Save to existing file
+                if let Err(e) = tab_manager::save_buffer_to_file(
+                    &context.window,
+                    &buffer,
+                    path,
+                ) {
+                    eprintln!("Error saving file: {}", e);
+                    // Show error dialog
+                            crate::dialogs::show_error_dialog(
+                                &context.window,
+                                "Error saving file",
+                                &format!("Could not save file: {}", e)
+                            );
                 }
+            } else {
+                // Need to save as - open save dialog
+                drop(buffer_paths_borrowed); // Drop borrow before calling save_file_dialog
+                crate::file_operations::save_file_dialog(
+                    &context.window,
+                    buffer,
+                    context.buffer_paths.clone(),
+                    Some(context.notebook.clone()),
+                );
             }
         }
     });
@@ -305,28 +235,14 @@ pub fn setup_actions(
     let app_context_clone_save_as = app_context.clone();
     save_as_action.connect_activate(move |_, _| {
         let context = app_context_clone_save_as.borrow();
-        if let Some(current_page) = context.notebook.current_page() {
-            if let Some(page) = context.notebook.nth_page(Some(current_page)) {
-                if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                    if let Some(scrolled_window) = text_view_with_line_numbers_box
-                        .last_child()
-                        .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                    {
-                        if let Some(text_view) = scrolled_window
-                            .child()
-                            .and_then(|w| w.downcast::<TextView>().ok())
-                        {
-                            let buffer = text_view.buffer();
-                            crate::file_operations::save_file_dialog(
-                                &context.window,
-                                buffer,
-                                context.buffer_paths.clone(),
-                                Some(context.notebook.clone()),
-                            );
-                        }
-                    }
-                }
-            }
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
+            let buffer = text_view.buffer();
+            crate::file_operations::save_file_dialog(
+                &context.window,
+                buffer,
+                context.buffer_paths.clone(),
+                Some(context.notebook.clone()),
+            );
         }
     });
     app.add_action(&save_as_action);
@@ -336,180 +252,166 @@ pub fn setup_actions(
     search_and_replace_action.connect_activate(move |_, _| {
         let context = app_context_clone_search_replace.borrow();
         // Get the current buffer
-        if let Some(current_page) = context.notebook.current_page() {
-            if let Some(page) = context.notebook.nth_page(Some(current_page)) {
-                if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                    if let Some(scrolled_window) = text_view_with_line_numbers_box
-                        .last_child()
-                        .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                    {
-                        if let Some(text_view) = scrolled_window
-                            .child()
-                            .and_then(|w| w.downcast::<TextView>().ok())
-                        {
-                            let buffer = text_view.buffer();
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
+            let buffer = text_view.buffer();
 
-                            // Get selected text or word under cursor as initial search text
-                            let initial_text = search::get_selected_text_or_word(&buffer);
+            // Get selected text or word under cursor as initial search text
+            let initial_text = search::get_selected_text_or_word(&buffer);
 
-                            // Create search and replace dialog
-                            let (
-                                dialog,
-                                search_entry,
-                                replace_entry,
-                                match_case_cb,
-                                whole_word_cb,
-                                regex_cb,
-                                status_label,
-                            ) = search_dialog::create_search_replace_dialog(
-                                &context.window,
-                                &initial_text,
-                            );
+            // Create search and replace dialog
+            let (
+                dialog,
+                search_entry,
+                replace_entry,
+                match_case_cb,
+                whole_word_cb,
+                regex_cb,
+                status_label,
+            ) = search_dialog::create_search_replace_dialog(
+                &context.window,
+                &initial_text,
+            );
 
-                            // Clone references for use in closures
-                            let buffer_clone = buffer.clone();
-                            let text_view_clone = text_view.clone();
-                            let status_label_clone = status_label.clone();
+            // Clone references for use in closures
+            let buffer_clone = buffer.clone();
+            let text_view_clone = text_view.clone();
+            let status_label_clone = status_label.clone();
 
-                            // Connect dialog buttons
-                            dialog.connect_response(move |d, response| {
-                                let search_text = search_entry.text().to_string();
-                                let replace_text = replace_entry.text().to_string();
-                                let match_case = match_case_cb.is_active();
-                                let whole_word = whole_word_cb.is_active();
-                                let use_regex = regex_cb.is_active();
+            // Connect dialog buttons
+            dialog.connect_response(move |d, response| {
+                let search_text = search_entry.text().to_string();
+                let replace_text = replace_entry.text().to_string();
+                let match_case = match_case_cb.is_active();
+                let whole_word = whole_word_cb.is_active();
+                let use_regex = regex_cb.is_active();
 
-                                // If using regex, validate the pattern first
-                                if use_regex && !search_text.is_empty() {
-                                    match search::compile_regex(&search_text, match_case) {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            status_label_clone
-                                                .set_text(&format!("Invalid regex: {}", e));
-                                            return;
-                                        }
-                                    }
-                                }
-
-                                if response == ResponseType::Ok {
-                                    // Find next occurrence
-                                    if !search_text.is_empty() {
-                                        match search::find_next_advanced(
-                                            &buffer_clone,
-                                            &search_text,
-                                            match_case,
-                                            whole_word,
-                                            use_regex,
-                                        ) {
-                                            Some((start_iter, end_iter)) => {
-                                                // Select the found text
-                                                buffer_clone.select_range(&start_iter, &end_iter);
-                                                // Scroll to the found text
-                                                let mut start_iter_mut = start_iter.clone();
-                                                text_view_clone.scroll_to_iter(
-                                                    &mut start_iter_mut,
-                                                    0.0,
-                                                    false,
-                                                    0.0,
-                                                    0.0,
-                                                );
-                                                status_label_clone.set_text("");
-                                            }
-                                            None => {
-                                                status_label_clone.set_text("Text not found");
-                                            }
-                                        }
-                                    }
-                                } else if response == ResponseType::Other(0) {
-                                    // Find previous occurrence
-                                    if !search_text.is_empty() {
-                                        match search::find_previous_advanced(
-                                            &buffer_clone,
-                                            &search_text,
-                                            match_case,
-                                            whole_word,
-                                            use_regex,
-                                        ) {
-                                            Some((start_iter, end_iter)) => {
-                                                // Select the found text
-                                                buffer_clone.select_range(&start_iter, &end_iter);
-                                                // Scroll to the found text
-                                                let mut start_iter_mut = start_iter.clone();
-                                                text_view_clone.scroll_to_iter(
-                                                    &mut start_iter_mut,
-                                                    0.0,
-                                                    false,
-                                                    0.0,
-                                                    0.0,
-                                                );
-                                                status_label_clone.set_text("");
-                                            }
-                                            None => {
-                                                status_label_clone.set_text("Text not found");
-                                            }
-                                        }
-                                    }
-                                } else if response == ResponseType::Apply {
-                                    // Replace current selection
-                                    if !search_text.is_empty() {
-                                        search::replace_selection_advanced(
-                                            &buffer_clone,
-                                            &search_text,
-                                            &replace_text,
-                                            use_regex,
-                                        );
-                                        // Find next occurrence
-                                        match search::find_next_advanced(
-                                            &buffer_clone,
-                                            &search_text,
-                                            match_case,
-                                            whole_word,
-                                            use_regex,
-                                        ) {
-                                            Some((start_iter, end_iter)) => {
-                                                // Select the found text
-                                                buffer_clone.select_range(&start_iter, &end_iter);
-                                                // Scroll to the found text
-                                                let mut start_iter_mut = start_iter.clone();
-                                                text_view_clone.scroll_to_iter(
-                                                    &mut start_iter_mut,
-                                                    0.0,
-                                                    false,
-                                                    0.0,
-                                                    0.0,
-                                                );
-                                                status_label_clone.set_text("");
-                                            }
-                                            None => {
-                                                status_label_clone.set_text("Text not found");
-                                            }
-                                        }
-                                    }
-                                } else if response == ResponseType::Other(1) {
-                                    // Replace all occurrences
-                                    if !search_text.is_empty() {
-                                        let count = search::replace_all_advanced(
-                                            &buffer_clone,
-                                            &search_text,
-                                            &replace_text,
-                                            match_case,
-                                            whole_word,
-                                            use_regex,
-                                        );
-                                        status_label_clone
-                                            .set_text(&format!("Replaced {} occurrences", count));
-                                    }
-                                } else if response == ResponseType::Cancel {
-                                    d.response(ResponseType::None);
-                                    d.close();
-                                }
-                            });
-
-                            dialog.present();
+                // If using regex, validate the pattern first
+                if use_regex && !search_text.is_empty() {
+                    match search::compile_regex(&search_text, match_case) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            status_label_clone
+                                .set_text(&format!("Invalid regex: {}", e));
+                            return;
                         }
                     }
                 }
-            }
+
+                if response == ResponseType::Ok {
+                    // Find next occurrence
+                    if !search_text.is_empty() {
+                        match search::find_next_advanced(
+                            &buffer_clone,
+                            &search_text,
+                            match_case,
+                            whole_word,
+                            use_regex,
+                        ) {
+                            Some((start_iter, end_iter)) => {
+                                // Select the found text
+                                buffer_clone.select_range(&start_iter, &end_iter);
+                                // Scroll to the found text
+                                let mut start_iter_mut = start_iter.clone();
+                                text_view_clone.scroll_to_iter(
+                                    &mut start_iter_mut,
+                                    0.0,
+                                    false,
+                                    0.0,
+                                    0.0,
+                                );
+                                status_label_clone.set_text("");
+                            }
+                            None => {
+                                status_label_clone.set_text("Text not found");
+                            }
+                        }
+                    }
+                } else if response == ResponseType::Other(0) {
+                    // Find previous occurrence
+                    if !search_text.is_empty() {
+                        match search::find_previous_advanced(
+                            &buffer_clone,
+                            &search_text,
+                            match_case,
+                            whole_word,
+                            use_regex,
+                        ) {
+                            Some((start_iter, end_iter)) => {
+                                // Select the found text
+                                buffer_clone.select_range(&start_iter, &end_iter);
+                                // Scroll to the found text
+                                let mut start_iter_mut = start_iter.clone();
+                                text_view_clone.scroll_to_iter(
+                                    &mut start_iter_mut,
+                                    0.0,
+                                    false,
+                                    0.0,
+                                    0.0,
+                                );
+                                status_label_clone.set_text("");
+                            }
+                            None => {
+                                status_label_clone.set_text("Text not found");
+                            }
+                        }
+                    }
+                } else if response == ResponseType::Apply {
+                    // Replace current selection
+                    if !search_text.is_empty() {
+                        search::replace_selection_advanced(
+                            &buffer_clone,
+                            &search_text,
+                            &replace_text,
+                            use_regex,
+                        );
+                        // Find next occurrence
+                        match search::find_next_advanced(
+                            &buffer_clone,
+                            &search_text,
+                            match_case,
+                            whole_word,
+                            use_regex,
+                        ) {
+                            Some((start_iter, end_iter)) => {
+                                // Select the found text
+                                buffer_clone.select_range(&start_iter, &end_iter);
+                                // Scroll to the found text
+                                let mut start_iter_mut = start_iter.clone();
+                                text_view_clone.scroll_to_iter(
+                                    &mut start_iter_mut,
+                                    0.0,
+                                    false,
+                                    0.0,
+                                    0.0,
+                                );
+                                status_label_clone.set_text("");
+                            }
+                            None => {
+                                status_label_clone.set_text("Text not found");
+                            }
+                        }
+                    }
+                } else if response == ResponseType::Other(1) {
+                    // Replace all occurrences
+                    if !search_text.is_empty() {
+                        let count = search::replace_all_advanced(
+                            &buffer_clone,
+                            &search_text,
+                            &replace_text,
+                            match_case,
+                            whole_word,
+                            use_regex,
+                        );
+                        status_label_clone
+                            .set_text(&format!("Replaced {} occurrences", count));
+                    }
+                } else if response == ResponseType::Cancel {
+                    d.response(ResponseType::None);
+                    d.close();
+                }
+            });
+
+            dialog.present();
         }
     });
     app.add_action(&search_and_replace_action);
@@ -518,18 +420,8 @@ pub fn setup_actions(
     let app_context_clone_cut = app_context.clone();
     cut_action.connect_activate(move |_, _| {
         let context = app_context_clone_cut.borrow();
-        if let Some(text_view) = get_current_text_view(&context.notebook) {
-            let buffer = text_view.buffer();
-            if let Some((start, end)) = buffer.selection_bounds() {
-                let selected_text = buffer.text(&start, &end, false).to_string();
-                if let Some(display) = gtk4::gdk::Display::default() {
-                    // Changed here
-                    let clipboard = display.clipboard();
-                    clipboard.set_text(&selected_text);
-                }
-                // Delete the selected text
-                buffer.delete(&mut start.clone(), &mut end.clone());
-            }
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
+            crate::clipboard::cut_selected_text(&text_view.buffer());
         }
     });
     app.add_action(&cut_action);
@@ -538,16 +430,8 @@ pub fn setup_actions(
     let app_context_clone_copy = app_context.clone();
     copy_action.connect_activate(move |_, _| {
         let context = app_context_clone_copy.borrow();
-        if let Some(text_view) = get_current_text_view(&context.notebook) {
-            let buffer = text_view.buffer();
-            if let Some((start, end)) = buffer.selection_bounds() {
-                let selected_text = buffer.text(&start, &end, false).to_string();
-                if let Some(display) = gtk4::gdk::Display::default() {
-                    // Changed here
-                    let clipboard = display.clipboard();
-                    clipboard.set_text(&selected_text);
-                }
-            }
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
+            crate::clipboard::copy_selected_text(&text_view.buffer());
         }
     });
     app.add_action(&copy_action);
@@ -556,18 +440,8 @@ pub fn setup_actions(
     let app_context_clone_paste = app_context.clone();
     paste_action.connect_activate(move |_, _| {
         let context = app_context_clone_paste.borrow();
-        if let Some(text_view) = get_current_text_view(&context.notebook) {
-            let buffer = text_view.buffer();
-            if let Some(display) = gtk4::gdk::Display::default() {
-                // Changed here
-                let clipboard = display.clipboard();
-                clipboard.read_text_async(None::<&gio::Cancellable>, move |res| {
-                    if let Ok(Some(text)) = res {
-                        let mut iter = buffer.iter_at_mark(&buffer.get_insert());
-                        buffer.insert(&mut iter, &text);
-                    }
-                });
-            }
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
+            crate::clipboard::paste_text_async(&text_view);
         }
     });
     app.add_action(&paste_action);
@@ -576,7 +450,7 @@ pub fn setup_actions(
     let app_context_clone_indent = app_context.clone();
     indent_action.connect_activate(move |_, _| {
         let context = app_context_clone_indent.borrow();
-        if let Some(text_view) = get_current_text_view(&context.notebook) {
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
             // Indent logic will go here
             indentation::indent_selection(&text_view.buffer());
         }
@@ -587,7 +461,7 @@ pub fn setup_actions(
     let app_context_clone_outdent = app_context.clone();
     outdent_action.connect_activate(move |_, _| {
         let context = app_context_clone_outdent.borrow();
-        if let Some(text_view) = get_current_text_view(&context.notebook) {
+        if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
             // Outdent logic will go here
             indentation::outdent_selection(&text_view.buffer());
         }
@@ -654,31 +528,11 @@ pub fn setup_actions(
                                                 if let Some(page) =
                                                     context_response.notebook.nth_page(Some(i))
                                                 {
-                                                    // The actual structure is: Box (line_numbers_area + ScrolledWindow (TextView))
-                                                    if let Some(text_view_with_line_numbers_box) =
-                                                        page.downcast_ref::<gtk4::Box>()
-                                                    {
-                                                        // Get the second child which should be the ScrolledWindow
-                                                        if let Some(scrolled_window) =
-                                                            text_view_with_line_numbers_box
-                                                                .last_child()
-                                                                .and_then(|w| {
-                                                                    w.downcast::<ScrolledWindow>()
-                                                                        .ok()
-                                                                })
-                                                        {
-                                                            if let Some(text_view) = scrolled_window
-                                                                .child()
-                                                                .and_then(|w| {
-                                                                    w.downcast::<TextView>().ok()
-                                                                })
-                                                            {
-                                                                let buffer = text_view.buffer();
-                                                                (context_response.highlight_closure)( // Call the closure directly
-                                                                    buffer.clone(),
-                                                                );
-                                                            }
-                                                        }
+                                                    if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                                                        let buffer = text_view.buffer();
+                                                        (context_response.highlight_closure)( // Call the closure directly
+                                                            buffer.clone(),
+                                                        );
                                                     }
                                                 }
                                             }
@@ -730,27 +584,17 @@ pub fn setup_actions(
 
             for i in 0..context.notebook.n_pages() {
                 if let Some(page) = context.notebook.nth_page(Some(i)) {
-                    if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                        if let Some(scrolled_window) = text_view_with_line_numbers_box
-                            .last_child()
-                            .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                        {
-                            if let Some(text_view) = scrolled_window
-                                .child()
-                                .and_then(|w| w.downcast::<TextView>().ok())
-                            {
-                                let buffer = text_view.buffer();
-                                let buffer_paths_borrowed = context.buffer_paths.borrow();
-                                let file_path = buffer_paths_borrowed.get(&buffer).cloned();
+                    if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                        let buffer = text_view.buffer();
+                        let buffer_paths_borrowed = context.buffer_paths.borrow();
+                        let file_path = buffer_paths_borrowed.get(&buffer).cloned();
 
-                                if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
-                                    has_unsaved_changes = true;
-                                    first_unsaved_buffer = Some(buffer);
-                                    first_unsaved_file_path = file_path;
-                                    first_unsaved_page_index = i;
-                                    break;
-                                }
-                            }
+                        if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
+                            has_unsaved_changes = true;
+                            first_unsaved_buffer = Some(buffer);
+                            first_unsaved_file_path = file_path;
+                            first_unsaved_page_index = i;
+                            break;
                         }
                     }
                 }

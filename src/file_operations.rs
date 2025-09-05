@@ -1,7 +1,5 @@
 use gtk4::prelude::*;
-use gtk4::{
-    FileChooserAction, FileChooserDialog, ResponseType, ScrolledWindow, TextView, TreeStore, Box, Label
-};
+use gtk4::{FileChooserAction, FileChooserDialog, ResponseType, TreeStore, Box, Label};
 use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
@@ -92,29 +90,19 @@ pub fn update_tab_label(
     // Find the page containing this buffer
     for i in 0..notebook.n_pages() {
         if let Some(page) = notebook.nth_page(Some(i)) {
-            if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
-                if let Some(scrolled_window) = text_view_with_line_numbers_box
-                    .last_child()
-                    .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                {
-                    if let Some(text_view) = scrolled_window
-                        .child()
-                        .and_then(|w| w.downcast::<TextView>().ok())
-                    {
-                        if text_view.buffer() == *buffer {
-                            // Update the tab label
-                            let filename = path
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("Untitled");
-                            if let Some(tab_label_box) = notebook.tab_label(&page).and_then(|w| w.downcast::<Box>().ok()) {
-                                if let Some(label) = tab_label_box.first_child().and_then(|w| w.downcast::<Label>().ok()) {
-                                    label.set_text(filename);
-                                }
-                            }
-                            break;
+            if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                if text_view.buffer() == *buffer {
+                    // Update the tab label
+                    let filename = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("Untitled");
+                    if let Some(tab_label_box) = notebook.tab_label(&page).and_then(|w| w.downcast::<Box>().ok()) {
+                        if let Some(label) = tab_label_box.first_child().and_then(|w| w.downcast::<Label>().ok()) {
+                            label.set_text(filename);
                         }
                     }
+                    break;
                 }
             }
         }
@@ -233,4 +221,20 @@ pub fn populate_tree_view(tree_store: &TreeStore, path: &std::path::Path) {
     } else {
         eprintln!("Error reading directory: {:?}", path);
     }
+}
+
+/// Utility function to check if a buffer has unsaved changes
+pub fn is_buffer_modified(buffer: &gtk4::TextBuffer, file_path: Option<&PathBuf>) -> bool {
+    if let Some(path) = file_path {
+        if let Ok(content_on_disk) = std::fs::read_to_string(path) {
+            let buffer_content = buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .to_string();
+            return buffer_content != content_on_disk;
+        }
+    }
+    // If file doesn't exist on disk or can't be read, consider it modified if it has content
+    let start = buffer.start_iter();
+    let end = buffer.end_iter();
+    !buffer.text(&start, &end, false).is_empty()
 }
