@@ -1,5 +1,6 @@
 mod actions;
 mod file_operations;
+mod indentation;
 pub mod search;
 mod settings;
 mod syntax_highlighting;
@@ -31,29 +32,29 @@ use file_operations::populate_tree_view;
 
 use gio::{self};
 
-// Struct to contain application state
-struct AppState {
-    app_settings: Rc<RefCell<AppSettings>>,
-    buffer_paths: Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
-    ps: Rc<SyntaxSet>,
-    ts: Rc<ThemeSet>,
-    syntax: Rc<SyntaxReference>,
-    current_theme: Rc<RefCell<Theme>>,
-    current_font_desc: Rc<RefCell<pango::FontDescription>>,
-    update_font: Rc<dyn Fn(&pango::FontDescription)>,
-    initial_font_size: Rc<RefCell<f64>>,
-    status_bar: Rc<RefCell<Label>>,
-    last_line: Rc<RefCell<u32>>,
-    last_col: Rc<RefCell<u32>>,
-    setup_buffer_connections: Rc<dyn Fn(&TextBuffer, &TextView)>,
-    tree_store: TreeStore,
-    notebook: Notebook,
-    window: ApplicationWindow,
-    highlight_closure: Rc<dyn Fn(TextBuffer)>,
-    syntax_highlight_timer: Rc<RefCell<Option<glib::SourceId>>>,
+pub struct AppContext {
+    pub app: Application,
+    pub app_settings: Rc<RefCell<AppSettings>>,
+    pub buffer_paths: Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
+    pub ps: Rc<SyntaxSet>,
+    pub ts: Rc<ThemeSet>,
+    pub syntax: Rc<SyntaxReference>,
+    pub current_theme: Rc<RefCell<Theme>>,
+    pub current_font_desc: Rc<RefCell<pango::FontDescription>>,
+    pub update_font: Rc<dyn Fn(&pango::FontDescription)>,
+    pub initial_font_size: Rc<RefCell<f64>>,
+    pub status_bar: Rc<RefCell<Label>>,
+    pub last_line: Rc<RefCell<u32>>,
+    pub last_col: Rc<RefCell<u32>>,
+    pub setup_buffer_connections: Rc<dyn Fn(&TextBuffer, &TextView)>,
+    pub tree_store: TreeStore,
+    pub notebook: Notebook,
+    pub window: ApplicationWindow,
+    pub highlight_closure: Rc<dyn Fn(TextBuffer)>,
+    pub syntax_highlight_timer: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
-impl AppState {
+impl AppContext {
     fn new(app: &Application) -> Rc<RefCell<Self>> {
         // --- Initial Setup ---
         let app_settings = Rc::new(RefCell::new(load_settings()));
@@ -310,47 +311,39 @@ impl AppState {
                     },
                 );
 
-                // Connect to ScrolledWindow's adjustment value-changed for scrolling
-                if let Some(parent_widget) = text_view.parent() {
-                    if let Some(parent_box) = parent_widget.downcast_ref::<gtk4::Box>() {
-                        if let Some(line_numbers_area) = parent_box
-                            .first_child()
-                            .and_then(|w| w.downcast_ref::<gtk4::DrawingArea>().map(|w| w.clone()))
-                        {
-                            if let Some(scrolled_window) =
-                                line_numbers_area.next_sibling().and_then(|w| {
-                                    w.downcast_ref::<gtk4::ScrolledWindow>().map(|w| w.clone())
-                                })
-                            {
-                                let text_view_clone_for_scroll = text_view.clone();
-                                let line_numbers_area_clone_for_scroll = line_numbers_area.clone();
-                                let prev_bracket_pos1_clone_for_scroll_conn =
-                                    prev_bracket_pos1.clone();
-                                let prev_bracket_pos2_clone_for_scroll_conn =
-                                    prev_bracket_pos2.clone();
-                                scrolled_window
-                                    .vadjustment()
-                                    .connect_value_changed(move |_| {
-                                        syntax_highlighting::update_bracket_highlighting(
-                                            &text_view_clone_for_scroll,
-                                            syntax_highlighting::find_matching_bracket,
-                                            &prev_bracket_pos1_clone_for_scroll_conn,
-                                            &prev_bracket_pos2_clone_for_scroll_conn,
-                                        );
-                                        line_numbers_area_clone_for_scroll.queue_draw();
-                                    });
-
-                                // Connect to text_buffer's changed signal to update line numbers if text changes
-                                let line_numbers_area_clone_for_changed = line_numbers_area.clone();
-                                buffer.connect_changed(move |_| {
-                                    line_numbers_area_clone_for_changed.queue_draw();
-                                });
-                            }
-                        }
-                    }
-                }
+                // Note: ScrolledWindow adjustment and buffer changed connections are now handled in tab_manager.rs
+                // when creating the text_view_with_line_numbers_box to avoid duplicate widget connections
             })
         };
+
+        let status_bar_clone = status_bar.clone();
+        let window_clone = window.clone();
+        let notebook_clone = notebook.clone();
+        let tree_store_clone = tree_store.clone();
+
+        let new_context_rc = Rc::new(RefCell::new(AppContext {
+            app: app.clone(),
+            app_settings,
+            buffer_paths,
+            ps,
+            ts,
+            syntax,
+            current_theme,
+            current_font_desc,
+            update_font,
+            initial_font_size,
+            status_bar: status_bar_clone,
+            last_line,
+            last_col,
+            setup_buffer_connections,
+            tree_store: tree_store_clone,
+            notebook: notebook_clone,
+            window: window_clone,
+            highlight_closure,
+
+            syntax_highlight_timer,
+        }));
+
 
         // --- Menu and Action Setup ---
         let file_menu_button = MenuButton::builder().label("File").build();
@@ -373,6 +366,8 @@ impl AppState {
         edit_menu_model.append(Some("Cut"), Some("app.cut"));
         edit_menu_model.append(Some("Copy"), Some("app.copy"));
         edit_menu_model.append(Some("Paste"), Some("app.paste"));
+        edit_menu_model.append(Some("Indent"), Some("app.indent"));
+        edit_menu_model.append(Some("Outdent"), Some("app.outdent"));
         edit_menu_model.append(Some("Settings"), Some("app.settings"));
         let edit_popover = PopoverMenu::from_model(Some(&edit_menu_model));
         edit_menu_button.set_popover(Some(&edit_popover));
@@ -386,40 +381,17 @@ impl AppState {
         header_bar.pack_start(&help_menu_button);
 
         // --- Action Definitions ---
-        setup_actions(
-            app,
-            &window,
-            &notebook,
-            &highlight_closure,
-            &current_theme,
-            &ts,
-            &current_font_desc,
-            &update_font,
-            &app_settings,
-            &tree_store,
-            &buffer_paths,
-            &initial_font_size,
-            &setup_buffer_connections,
-        );
+        setup_actions(&new_context_rc);
 
         // Populate the tree view with the initial directory
         populate_tree_view(&tree_store, &initial_directory);
 
         // --- Tree View Row Activation ---
-        let notebook_clone_tree_view = notebook.clone();
-        let highlight_closure_clone_tree_view = highlight_closure.clone();
-        let tree_store_clone_tree_view = tree_store.clone();
-        let buffer_paths_for_tree_view_closure = buffer_paths.clone();
-        let app_clone_tree_view = app.clone();
-        let current_font_desc_clone_tree_view = current_font_desc.clone();
-        let update_font_clone_tree_view = update_font.clone();
-        let initial_font_size_clone_tree_view = initial_font_size.clone();
-        let setup_buffer_connections_clone_tree_view = setup_buffer_connections.clone();
-        let app_settings_clone_tree_view = app_settings.clone();
-
+        let app_context_clone_tree_view = new_context_rc.clone();
         tree_view.connect_row_activated(move |_, tree_path, _column| {
-            if let Some(iter) = tree_store_clone_tree_view.iter(tree_path) {
-                if let Ok(path_value) = tree_store_clone_tree_view
+            let context = app_context_clone_tree_view.borrow();
+            if let Some(iter) = context.tree_store.iter(tree_path) {
+                if let Ok(path_value) = context.tree_store
                     .get_value(&iter, 1)
                     .get::<String>()
                 {
@@ -427,20 +399,19 @@ impl AppState {
                     if path.is_file() {
                         tab_manager::open_file_in_new_tab(
                             &path,
-                            &notebook_clone_tree_view,
-                            &highlight_closure_clone_tree_view,
-                            &buffer_paths_for_tree_view_closure,
-                            &app_clone_tree_view,
-                            &current_font_desc_clone_tree_view,
-                            &update_font_clone_tree_view,
-                            &initial_font_size_clone_tree_view,
-                            &setup_buffer_connections_clone_tree_view,
+                            &context.notebook,
+                            &context.highlight_closure,
+                            &context.buffer_paths,
+                            &context.app,
+                            &context.current_font_desc,
+                            &context.update_font,
+                            &context.initial_font_size,
+                            &context.setup_buffer_connections,
                         );
                     } else if path.is_dir() {
                         open_directory_in_tree(
                             &path,
-                            &tree_store_clone_tree_view,
-                            &app_settings_clone_tree_view,
+                            &app_context_clone_tree_view,
                         );
                     }
                 }
@@ -452,109 +423,7 @@ impl AppState {
         main_paned.set_end_child(Some(&vbox));
         window.set_child(Some(&main_paned));
 
-        let app_clone_for_close = app.clone();
-        let notebook_clone_for_close = notebook.clone();
-        let buffer_paths_clone_for_close = buffer_paths.clone();
-        let app_settings_clone_for_close = app_settings.clone(); // Clone app_settings
-        window.connect_close_request(move |win| {
-            // Get currently open files and save them to settings
-            let open_files = tab_manager::get_open_file_paths(
-                &notebook_clone_for_close,
-                &buffer_paths_clone_for_close,
-            );
-            app_settings_clone_for_close.borrow_mut().last_opened_files = Some(open_files);
-            save_settings(&app_settings_clone_for_close.borrow());
-
-            // Check if any files have unsaved changes
-            let mut has_unsaved_changes = false;
-            let mut first_unsaved_buffer = None;
-            let mut first_unsaved_file_path = None;
-            let mut first_unsaved_page_index = 0;
-
-            for i in 0..notebook_clone_for_close.n_pages() {
-                if let Some(page) = notebook_clone_for_close.nth_page(Some(i)) {
-                    if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>()
-                    {
-                        if let Some(scrolled_window) = text_view_with_line_numbers_box
-                            .last_child()
-                            .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                        {
-                            if let Some(text_view) = scrolled_window
-                                .child()
-                                .and_then(|w| w.downcast::<TextView>().ok())
-                            {
-                                let buffer = text_view.buffer();
-                                let buffer_paths_borrowed = buffer_paths_clone_for_close.borrow();
-                                let file_path = buffer_paths_borrowed.get(&buffer).cloned();
-
-                                if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
-                                    has_unsaved_changes = true;
-                                    first_unsaved_buffer = Some(buffer);
-                                    first_unsaved_file_path = file_path;
-                                    first_unsaved_page_index = i;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if has_unsaved_changes {
-                if let Some(buffer) = first_unsaved_buffer {
-                    let app_clone2 = app_clone_for_close.clone();
-                    let buffer_paths_clone2 = buffer_paths_clone_for_close.clone();
-                    let notebook_clone2 = notebook_clone_for_close.clone();
-                    let window_clone2 = win.clone();
-
-                    tab_manager::prompt_save_changes_async(
-                        &window_clone2,
-                        buffer,
-                        first_unsaved_file_path,
-                        buffer_paths_clone2,
-                        notebook_clone2,
-                        first_unsaved_page_index as u32,
-                        move |proceed| {
-                            if proceed {
-                                // User wants to proceed with exit
-                                app_clone2.quit();
-                            }
-                            // If not proceed, the user cancelled, so we don't exit
-                        },
-                    );
-                    // Return glib::Propagation::Stop to prevent the window from closing immediately
-                    return glib::Propagation::Stop;
-                }
-            }
-
-            // No unsaved changes, exit immediately
-            win.application()
-                .expect("No application associated with window")
-                .quit();
-            glib::Propagation::Proceed
-        });
-
-        Rc::new(RefCell::new(AppState {
-            app_settings,
-            buffer_paths,
-            ps,
-            ts,
-            syntax,
-            current_theme,
-            current_font_desc,
-            update_font,
-            initial_font_size,
-            status_bar,
-            last_line,
-            last_col,
-            setup_buffer_connections,
-            tree_store,
-            notebook,
-            window,
-            highlight_closure,
-
-            syntax_highlight_timer,
-        }))
+        new_context_rc
     }
 }
 
@@ -565,24 +434,24 @@ fn main() -> glib::ExitCode {
         .build();
 
     // Use a RefCell to allow mutable access to AppState from different closures
-    let app_state: Rc<RefCell<Option<Rc<RefCell<AppState>>>>> = Rc::new(RefCell::new(None));
+    let app_context: Rc<RefCell<Option<Rc<RefCell<AppContext>>>>> = Rc::new(RefCell::new(None));
 
     app.connect_activate({
-        let app_state = app_state.clone();
+        let app_context_clone = app_context.clone();
         move |app: &Application| {
-            // Create AppState only if it hasn't been created by connect_open
-            if app_state.borrow().is_none() {
-                let new_state = AppState::new(app);
+            // Create AppContext only if it hasn't been created by connect_open
+            if app_context_clone.borrow().is_none() {
+                let new_context = AppContext::new(app);
                 let mut opened_any_file = false;
                 // If no files were opened via command line, open last opened files
-                if new_state
+                if new_context
                     .borrow()
                     .app_settings
                     .borrow()
                     .last_opened_files
                     .is_some()
                 {
-                    if let Some(files_to_open) = new_state
+                    if let Some(files_to_open) = new_context
                         .borrow()
                         .app_settings
                         .borrow()
@@ -593,14 +462,14 @@ fn main() -> glib::ExitCode {
                             if path.is_file() {
                                 tab_manager::open_file_in_new_tab(
                                     &path,
-                                    &new_state.borrow().notebook,
-                                    &new_state.borrow().highlight_closure,
-                                    &new_state.borrow().buffer_paths,
-                                    app,
-                                    &new_state.borrow().current_font_desc,
-                                    &new_state.borrow().update_font,
-                                    &new_state.borrow().initial_font_size,
-                                    &new_state.borrow().setup_buffer_connections,
+                                    &new_context.borrow().notebook,
+                                    &new_context.borrow().highlight_closure,
+                                    &new_context.borrow().buffer_paths,
+                                    &new_context.borrow().app,
+                                    &new_context.borrow().current_font_desc,
+                                    &new_context.borrow().update_font,
+                                    &new_context.borrow().initial_font_size,
+                                    &new_context.borrow().setup_buffer_connections,
                                 );
                                 opened_any_file = true;
                             }
@@ -610,59 +479,58 @@ fn main() -> glib::ExitCode {
                 // If no files were opened (neither from command line nor from settings), create a new untitled tab
                 if !opened_any_file {
                     tab_manager::create_new_file_tab(
-                        &new_state.borrow().notebook,
-                        &new_state.borrow().highlight_closure,
-                        &new_state.borrow().buffer_paths,
-                        app,
-                        &new_state.borrow().current_font_desc,
-                        &new_state.borrow().update_font,
-                        &new_state.borrow().initial_font_size,
-                        &new_state.borrow().setup_buffer_connections,
+                        &new_context.borrow().notebook,
+                        &new_context.borrow().highlight_closure,
+                        &new_context.borrow().buffer_paths,
+                        &new_context.borrow().app,
+                        &new_context.borrow().current_font_desc,
+                        &new_context.borrow().update_font,
+                        &new_context.borrow().initial_font_size,
+                        &new_context.borrow().setup_buffer_connections,
                     );
                 }
-                *app_state.borrow_mut() = Some(new_state);
+                *app_context_clone.borrow_mut() = Some(new_context);
             }
             // Present the window
-            if let Some(state) = app_state.borrow().as_ref() {
-                state.borrow().window.present();
+            if let Some(context_ref) = app_context_clone.borrow().as_ref() {
+                context_ref.borrow().window.present();
             }
         }
     });
 
     app.connect_open({
-        let app_state = app_state.clone();
+        let app_context_clone = app_context.clone();
         move |app, files, _| {
-            // Create AppState only if it hasn't been created by connect_activate
-            if app_state.borrow().is_none() {
-                *app_state.borrow_mut() = Some(AppState::new(app));
+            // Create AppContext only if it hasn't been created by connect_activate
+            if app_context_clone.borrow().is_none() {
+                *app_context_clone.borrow_mut() = Some(AppContext::new(app));
             }
 
-            if let Some(state) = app_state.borrow().as_ref() {
-                let state_borrowed = state.borrow();
+            if let Some(context_ref) = app_context_clone.borrow().as_ref() {
+                let context = context_ref.borrow();
                 for file in files {
                     if let Some(path) = file.path() {
                         if path.is_file() {
                             tab_manager::open_file_in_new_tab(
                                 &path,
-                                &state_borrowed.notebook,
-                                &state_borrowed.highlight_closure,
-                                &state_borrowed.buffer_paths,
-                                app,
-                                &state_borrowed.current_font_desc,
-                                &state_borrowed.update_font,
-                                &state_borrowed.initial_font_size,
-                                &state_borrowed.setup_buffer_connections,
+                                &context.notebook,
+                                &context.highlight_closure,
+                                &context.buffer_paths,
+                                &context.app,
+                                &context.current_font_desc,
+                                &context.update_font,
+                                &context.initial_font_size,
+                                &context.setup_buffer_connections,
                             );
                         } else if path.is_dir() {
                             open_directory_in_tree(
                                 &path,
-                                &state_borrowed.tree_store,
-                                &state_borrowed.app_settings,
+                                context_ref,
                             );
                         }
                     }
                 }
-                state_borrowed.window.present();
+                context.window.present();
             }
         }
     });

@@ -1,4 +1,3 @@
-use crate::settings::AppSettings;
 use gtk4::prelude::*;
 use gtk4::{
     FileChooserAction, FileChooserDialog, ResponseType, ScrolledWindow, TextView, TreeStore, Box, Label
@@ -7,6 +6,8 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
+
+use crate::AppContext;
 
 /// Opens a file chooser dialog for opening files
 pub fn open_file_dialog(
@@ -56,8 +57,7 @@ pub fn open_file_dialog(
 /// Opens a folder chooser dialog for opening directories
 pub fn open_directory_dialog(
     parent: &impl IsA<gtk4::Window>,
-    tree_store: TreeStore,
-    app_settings: Rc<RefCell<AppSettings>>,
+    app_context: Rc<RefCell<AppContext>>,
 ) {
     let folder_chooser = FileChooserDialog::builder()
         .title("Open Directory")
@@ -73,7 +73,8 @@ pub fn open_directory_dialog(
         if response == ResponseType::Accept {
             if let Some(folder) = dialog.file() {
                 if let Some(path) = folder.path() {
-                    crate::actions::open_directory_in_tree(&path, &tree_store, &app_settings);
+                    // Pass app_context directly
+                    crate::actions::open_directory_in_tree(&path, &app_context);
                 }
             }
         }
