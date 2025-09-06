@@ -1,3 +1,9 @@
+//! Module for handling application actions and menu commands
+//!
+//! This module defines all the actions that can be triggered through the application's
+//! menus, keyboard shortcuts, or other UI elements. It includes file operations,
+//! editing functions, search functionality, and application settings.
+
 use std::path::PathBuf;
 
 use gtk4::prelude::TextViewExt;
@@ -18,30 +24,50 @@ use crate::ui::search_dialog;
 use crate::tab_manager;
 use crate::indentation;
 
+use crate::search;
+
+/// Opens a directory in the tree view
+///
+/// This function populates the tree view with the contents of the specified directory
+/// and updates the application settings to remember this directory for future sessions.
+///
+/// # Arguments
+///
+/// * `path` - The path to the directory to open
+/// * `app_context` - Reference to the application context
 pub fn open_directory_in_tree(
     path: &PathBuf,
     app_context: &Rc<RefCell<AppContext>>,
 ) {
-    let context = app_context.borrow();
-    crate::file_operations::populate_tree_view(&context.tree_store, path);
-    context.app_settings.borrow_mut().last_opened_directory = Some(path.clone());
-    save_settings(&context.app_settings.borrow());
+    crate::file_operations::populate_tree_view(&app_context.borrow().tree_store, path);
+    app_context.borrow_mut().app_settings.borrow_mut().last_opened_directory = Some(path.clone());
+    save_settings(&app_context.borrow().app_settings.borrow());
 }
 
-use crate::search;
 
+/// Sets up all application actions and connects them to their respective handlers
+///
+/// This function creates all the menu actions for the application and connects them
+/// to appropriate callback functions. It also sets up keyboard accelerators for
+/// common operations.
+///
+/// # Arguments
+///
+/// * `app_context` - Reference to the application context
 pub fn setup_actions(
-    app_context: &Rc<RefCell<AppContext>>,
+    app_context: Rc<RefCell<AppContext>>,
 ) {
-    let context = app_context.borrow();
+    let app_context_for_app = app_context.clone(); // Clone for app
+    let app_context_for_closures = app_context.clone(); // Clone once for all closures
 
-    let app = &context.app;
+    let app = &app_context_for_app.borrow().app; // Borrow app directly from app_context_for_app
     
 
     let new_action = SimpleAction::new("new", None);
-    let app_context_clone_new = app_context.clone();
+    let app_context_clone_new = app_context_for_closures.clone(); // Use the clone for closures
     new_action.connect_activate(move |_, _| {
-        let context = app_context_clone_new.borrow();
+        let context = app_context_clone_new.borrow(); // Borrow context inside the closure
+        // Remove: let app = &context.app; // Borrow app inside the closure
         // Check if current file needs saving
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
             let buffer = text_view.buffer();
@@ -63,17 +89,9 @@ pub fn setup_actions(
                     context.notebook.current_page().unwrap_or(0), // Get current page index
                     move |proceed| {
                         if proceed {
-                            let context_for_tab = app_context_clone_for_prompt.borrow();
                             // Create new file tab
                             tab_manager::create_new_file_tab(
-                                &context_for_tab.notebook,
-                                &context_for_tab.highlight_closure,
-                                &context_for_tab.buffer_paths,
-                                &context_for_tab.app,
-                                &context_for_tab.current_font_desc,
-                                &context_for_tab.update_font,
-                                &context_for_tab.initial_font_size,
-                                &context_for_tab.setup_buffer_connections,
+                                &app_context_clone_for_prompt,
                             );
                         }
                     },
@@ -85,20 +103,13 @@ pub fn setup_actions(
         }
 
         tab_manager::create_new_file_tab(
-            &context.notebook,
-            &context.highlight_closure,
-            &context.buffer_paths,
-            &context.app,
-            &context.current_font_desc,
-            &context.update_font,
-            &context.initial_font_size,
-            &context.setup_buffer_connections,
+            &app_context,
         );
     });
     app.add_action(&new_action);
 
     let open_action = SimpleAction::new("open", None);
-    let app_context_clone_open = app_context.clone();
+    let app_context_clone_open = app_context_for_closures.clone();
     open_action.connect_activate(move |_, _| {
         let context = app_context_clone_open.borrow();
         // Check if current file needs saving
@@ -126,14 +137,7 @@ pub fn setup_actions(
                             // Open file dialog
                             open_file_dialog(
                                 &context_for_dialog.window,
-                                context_for_dialog.notebook.clone(),
-                                context_for_dialog.highlight_closure.clone(),
-                                context_for_dialog.buffer_paths.clone(),
-                                context_for_dialog.app.clone(),
-                                context_for_dialog.current_font_desc.clone(),
-                                context_for_dialog.update_font.clone(),
-                                context_for_dialog.initial_font_size.clone(),
-                                context_for_dialog.setup_buffer_connections.clone(),
+                                app_context_clone_for_prompt.clone(),
                             );
                         }
                     },
@@ -146,20 +150,13 @@ pub fn setup_actions(
 
         open_file_dialog(
             &context.window,
-            context.notebook.clone(),
-            context.highlight_closure.clone(),
-            context.buffer_paths.clone(),
-            context.app.clone(),
-            context.current_font_desc.clone(),
-            context.update_font.clone(),
-            context.initial_font_size.clone(),
-            context.setup_buffer_connections.clone(),
+            app_context_clone_open.clone(),
         );
     });
     app.add_action(&open_action);
 
     let open_directory_action = SimpleAction::new("open_directory", None);
-    let app_context_clone_open_dir = app_context.clone();
+    let app_context_clone_open_dir = app_context_for_closures.clone();
     open_directory_action.connect_activate(move |_, _| {
         let context = app_context_clone_open_dir.borrow();
         open_directory_dialog(
@@ -170,7 +167,7 @@ pub fn setup_actions(
     app.add_action(&open_directory_action);
 
     let close_current_file_action = SimpleAction::new("close_current_file", None);
-    let app_context_clone_close = app_context.clone();
+    let app_context_clone_close = app_context_for_closures.clone();
     close_current_file_action.connect_activate(move |_, _| {
         let context = app_context_clone_close.borrow();
         tab_manager::close_current_tab(
@@ -182,7 +179,7 @@ pub fn setup_actions(
     app.add_action(&close_current_file_action);
 
     let close_all_files_action = SimpleAction::new("close_all_files", None);
-    let app_context_clone_close_all = app_context.clone();
+    let app_context_clone_close_all = app_context_for_closures.clone();
     close_all_files_action.connect_activate(move |_, _| {
         let context = app_context_clone_close_all.borrow();
         tab_manager::close_all_tabs_with_prompts(
@@ -194,7 +191,7 @@ pub fn setup_actions(
     app.add_action(&close_all_files_action);
 
     let save_action = SimpleAction::new("save", None);
-    let app_context_clone_save = app_context.clone();
+    let app_context_clone_save = app_context_for_closures.clone();
     save_action.connect_activate(move |_, _| {
         let context = app_context_clone_save.borrow();
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
@@ -232,7 +229,7 @@ pub fn setup_actions(
     app.add_action(&save_action);
 
     let save_as_action = SimpleAction::new("save_as", None);
-    let app_context_clone_save_as = app_context.clone();
+    let app_context_clone_save_as = app_context_for_closures.clone();
     save_as_action.connect_activate(move |_, _| {
         let context = app_context_clone_save_as.borrow();
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
@@ -248,7 +245,7 @@ pub fn setup_actions(
     app.add_action(&save_as_action);
 
     let search_and_replace_action = SimpleAction::new("search_and_replace", None);
-    let app_context_clone_search_replace = app_context.clone();
+    let app_context_clone_search_replace = app_context_for_closures.clone();
     search_and_replace_action.connect_activate(move |_, _| {
         let context = app_context_clone_search_replace.borrow();
         // Get the current buffer
@@ -417,7 +414,7 @@ pub fn setup_actions(
     app.add_action(&search_and_replace_action);
 
     let cut_action = SimpleAction::new("cut", None);
-    let app_context_clone_cut = app_context.clone();
+    let app_context_clone_cut = app_context_for_closures.clone();
     cut_action.connect_activate(move |_, _| {
         let context = app_context_clone_cut.borrow();
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
@@ -427,7 +424,7 @@ pub fn setup_actions(
     app.add_action(&cut_action);
 
     let copy_action = SimpleAction::new("copy", None);
-    let app_context_clone_copy = app_context.clone();
+    let app_context_clone_copy = app_context_for_closures.clone();
     copy_action.connect_activate(move |_, _| {
         let context = app_context_clone_copy.borrow();
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
@@ -437,7 +434,7 @@ pub fn setup_actions(
     app.add_action(&copy_action);
 
     let paste_action = SimpleAction::new("paste", None);
-    let app_context_clone_paste = app_context.clone();
+    let app_context_clone_paste = app_context_for_closures.clone();
     paste_action.connect_activate(move |_, _| {
         let context = app_context_clone_paste.borrow();
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
@@ -447,7 +444,7 @@ pub fn setup_actions(
     app.add_action(&paste_action);
 
     let indent_action = SimpleAction::new("indent", None);
-    let app_context_clone_indent = app_context.clone();
+    let app_context_clone_indent = app_context_for_closures.clone();
     indent_action.connect_activate(move |_, _| {
         let context = app_context_clone_indent.borrow();
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
@@ -458,7 +455,7 @@ pub fn setup_actions(
     app.add_action(&indent_action);
 
     let outdent_action = SimpleAction::new("outdent", None);
-    let app_context_clone_outdent = app_context.clone();
+    let app_context_clone_outdent = app_context_for_closures.clone();
     outdent_action.connect_activate(move |_, _| {
         let context = app_context_clone_outdent.borrow();
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
@@ -469,7 +466,7 @@ pub fn setup_actions(
     app.add_action(&outdent_action);
 
     let about_action = SimpleAction::new("about", None);
-    let app_context_clone_about = app_context.clone();
+    let app_context_clone_about = app_context_for_closures.clone();
     about_action.connect_activate(move |_, _| {
         let context = app_context_clone_about.borrow();
         let dialog = crate::ui::windows::create_about_dialog(&context.window);
@@ -480,7 +477,7 @@ pub fn setup_actions(
     // Settings Action
     let settings_gtk = Settings::default().unwrap();
     let settings_action = SimpleAction::new("settings", None);
-    let app_context_clone_settings = app_context.clone();
+    let app_context_clone_settings = app_context_for_closures.clone();
 
     settings_action.connect_activate(move |_, _| {
         let context = app_context_clone_settings.borrow();
@@ -517,11 +514,13 @@ pub fn setup_actions(
                                             settings_clone_response
                                                 .set_gtk_application_prefer_dark_theme(is_dark);
                                             if is_dark {
-                                                *context_response.current_theme.borrow_mut() =
-                                                    context_response.ts.themes["base16-ocean.dark"].clone();
+                                                let ts_clone = context_response.syntax_context.borrow().ts.clone();
+                                                *context_response.syntax_context.borrow_mut().current_theme.borrow_mut() =
+                                                    ts_clone.themes["base16-ocean.dark"].clone();
                                             } else {
-                                                *context_response.current_theme.borrow_mut() =
-                                                    context_response.ts.themes["InspiredGitHub"].clone();
+                                                let ts_clone = context_response.syntax_context.borrow().ts.clone();
+                                                *context_response.syntax_context.borrow_mut().current_theme.borrow_mut() =
+                                                    ts_clone.themes["InspiredGitHub"].clone();
                                             }
 
                                             for i in 0..context_response.notebook.n_pages() {
@@ -530,7 +529,7 @@ pub fn setup_actions(
                                                 {
                                                     if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
                                                         let buffer = text_view.buffer();
-                                                        (context_response.highlight_closure)( // Call the closure directly
+                                                        (context_response.syntax_context.borrow().highlight_closure)( // Call the closure directly
                                                             buffer.clone(),
                                                         );
                                                     }
@@ -572,7 +571,7 @@ pub fn setup_actions(
     app.add_action(&settings_action);
 
     let quit_action = SimpleAction::new("quit", None);
-    let app_context_clone_quit = app_context.clone();
+    let app_context_clone_quit = app_context_for_closures.clone();
     quit_action.connect_activate(move |_, _| {
         let context = app_context_clone_quit.borrow();
         // Check if any files have unsaved changes

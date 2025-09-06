@@ -1,3 +1,9 @@
+//! Module for file operations
+//!
+//! This module provides functions for opening, saving, and managing files
+//! within the application, as well as directory operations and file system
+//! interactions.
+
 use gtk4::prelude::*;
 use gtk4::{FileChooserAction, FileChooserDialog, ResponseType, TreeStore, Box, Label};
 use std::cell::RefCell;
@@ -7,17 +13,9 @@ use std::rc::Rc;
 
 use crate::AppContext;
 
-/// Opens a file chooser dialog for opening files
 pub fn open_file_dialog(
     parent: &impl IsA<gtk4::Window>,
-    notebook: gtk4::Notebook,
-    highlight_closure: Rc<dyn Fn(gtk4::TextBuffer)>,
-    buffer_paths: Rc<RefCell<std::collections::HashMap<gtk4::TextBuffer, PathBuf>>>,
-    app: gtk4::Application,
-    current_font_desc: Rc<RefCell<gtk4::pango::FontDescription>>,
-    update_font: Rc<dyn Fn(&gtk4::pango::FontDescription)>,
-    initial_font_size: Rc<RefCell<f64>>,
-    setup_buffer_connections: Rc<dyn Fn(&gtk4::TextBuffer, &gtk4::TextView)>,
+    app_context: Rc<RefCell<AppContext>>,
 ) {
     let file_chooser = FileChooserDialog::builder()
         .title("Open File")
@@ -35,14 +33,7 @@ pub fn open_file_dialog(
                 if let Some(path) = file.path() {
                     crate::tab_manager::open_file_in_new_tab(
                         &path,
-                        &notebook,
-                        &highlight_closure,
-                        &buffer_paths,
-                        &app,
-                        &current_font_desc,
-                        &update_font,
-                        &initial_font_size,
-                        &setup_buffer_connections,
+                        &app_context,
                     );
                 }
             }

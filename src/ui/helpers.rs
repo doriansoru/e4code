@@ -1,8 +1,21 @@
+//! UI helpers module
+//!
+//! This module provides helper functions for working with UI components,
+//! such as extracting text views from notebook pages.
+
 use gtk4::prelude::*;
 use gtk4::{Notebook, ScrolledWindow, TextView};
 
 /// Helper function to get the TextView from a given Notebook page widget.
 /// This encapsulates the common pattern of traversing the widget hierarchy.
+///
+/// # Arguments
+///
+/// * `page` - Reference to the notebook page widget
+///
+/// # Returns
+///
+/// Optional reference to the TextView if found
 pub fn get_text_view_from_page(page: &gtk4::Widget) -> Option<TextView> {
     // The actual structure is: Box (line_numbers_area + ScrolledWindow (TextView))
     if let Some(text_view_with_line_numbers_box) = page.downcast_ref::<gtk4::Box>() {
@@ -22,6 +35,14 @@ pub fn get_text_view_from_page(page: &gtk4::Widget) -> Option<TextView> {
 }
 
 /// Helper function to get the TextView from the currently active page of a Notebook.
+///
+/// # Arguments
+///
+/// * `notebook` - Reference to the notebook widget
+///
+/// # Returns
+///
+/// Optional reference to the TextView if found
 pub fn get_current_text_view(notebook: &Notebook) -> Option<TextView> {
     if let Some(current_page_num) = notebook.current_page() {
         if let Some(page) = notebook.nth_page(Some(current_page_num)) {

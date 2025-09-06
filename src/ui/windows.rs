@@ -1,7 +1,25 @@
+//! Windows UI module
+//!
+//! This module provides dialog windows for the application, such as
+//! settings and about dialogs.
+
 use gtk4::prelude::*;
 use gtk4::{AboutDialog, Box, ComboBoxText, Dialog, FontButton, Label, Orientation, ResponseType};
 
 /// Creates a settings dialog
+///
+/// This function creates a dialog window for configuring application settings
+/// such as theme and font preferences.
+///
+/// # Arguments
+///
+/// * `parent` - Parent window for the dialog
+/// * `current_theme` - Current theme setting ("light" or "dark")
+/// * `current_font` - Current font setting in Pango format
+///
+/// # Returns
+///
+/// A dialog window for settings configuration
 pub fn create_settings_dialog(
     parent: &impl IsA<gtk4::Window>,
     current_theme: &str,
@@ -46,6 +64,17 @@ pub fn create_settings_dialog(
 }
 
 /// Creates an about dialog
+///
+/// This function creates a dialog window displaying information about
+/// the application, including version, authors, and website.
+///
+/// # Arguments
+///
+/// * `parent` - Parent window for the dialog
+///
+/// # Returns
+///
+/// An about dialog window
 pub fn create_about_dialog(parent: &impl IsA<gtk4::Window>) -> AboutDialog {
     let dialog = AboutDialog::builder()
         .transient_for(parent)

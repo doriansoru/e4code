@@ -1,3 +1,8 @@
+//! Module for text indentation operations
+//!
+//! This module provides functions for indenting and outdenting selected text
+//! or the current line in the text editor.
+
 use gtk4::{TextBuffer};
 use gtk4::prelude::*;
 use std::collections::HashMap;
@@ -59,6 +64,15 @@ fn detect_indent_style(buffer: &TextBuffer) -> (bool, usize) {
     }
 }
 
+/// Indents the selected text or the current line
+///
+/// This function adds indentation to the selected text or the current line.
+/// It detects the current indentation style (tabs or spaces) and uses that
+/// for the indentation.
+///
+/// # Arguments
+///
+/// * `buffer` - The text buffer to indent
 pub fn indent_selection(buffer: &TextBuffer) {
     let (is_tab_indent, indent_width) = detect_indent_style(buffer);
     let indent_string = if is_tab_indent {
@@ -69,10 +83,11 @@ pub fn indent_selection(buffer: &TextBuffer) {
 
     let mut start_iter;
     let mut end_iter;
-    let has_selection = buffer.selection_bounds().is_some();
+    let initial_selection_bounds = buffer.selection_bounds(); // Store the Option result
 
-    if has_selection {
-        (start_iter, end_iter) = buffer.selection_bounds().unwrap();
+    if let Some((s_iter, e_iter)) = initial_selection_bounds {
+        start_iter = s_iter;
+        end_iter = e_iter;
     } else {
         start_iter = buffer.iter_at_mark(&buffer.get_insert());
         start_iter.set_line_offset(0);
@@ -84,12 +99,12 @@ pub fn indent_selection(buffer: &TextBuffer) {
     let end_line = end_iter.line(); // Get the line number of the end of the selection
 
     // Store the original selection marks to restore them later
-    let original_selection_start_mark = if has_selection {
+    let original_selection_start_mark = if initial_selection_bounds.is_some() {
         Some(buffer.create_mark(None, &start_iter, false))
     } else {
         None
     };
-    let original_selection_end_mark = if has_selection {
+    let original_selection_end_mark = if initial_selection_bounds.is_some() {
         Some(buffer.create_mark(None, &end_iter, false))
     } else {
         None
@@ -106,7 +121,7 @@ pub fn indent_selection(buffer: &TextBuffer) {
     buffer.end_user_action();
 
     // Restore the selection
-    if has_selection {
+    if initial_selection_bounds.is_some() {
         if let (Some(start_mark), Some(end_mark)) = (original_selection_start_mark, original_selection_end_mark) {
             let new_start_iter = buffer.iter_at_mark(&start_mark);
             let new_end_iter = buffer.iter_at_mark(&end_mark);
@@ -117,6 +132,16 @@ pub fn indent_selection(buffer: &TextBuffer) {
     }
 }
 
+
+/// Outdents the selected text or the current line
+///
+/// This function removes indentation from the selected text or the current line.
+/// It detects the current indentation style (tabs or spaces) and uses that
+/// for the outdentation.
+///
+/// # Arguments
+///
+/// * `buffer` - The text buffer to outdent
 pub fn outdent_selection(buffer: &TextBuffer) {
     let (is_tab_indent, indent_width) = detect_indent_style(buffer);
     let indent_prefix_string = if is_tab_indent {
@@ -129,10 +154,11 @@ pub fn outdent_selection(buffer: &TextBuffer) {
 
     let mut start_iter;
     let mut end_iter;
-    let has_selection = buffer.selection_bounds().is_some();
+    let initial_selection_bounds = buffer.selection_bounds(); // Store the Option result
 
-    if has_selection {
-        (start_iter, end_iter) = buffer.selection_bounds().unwrap();
+    if let Some((s_iter, e_iter)) = initial_selection_bounds {
+        start_iter = s_iter;
+        end_iter = e_iter;
     } else {
         start_iter = buffer.iter_at_mark(&buffer.get_insert());
         start_iter.set_line_offset(0);
@@ -144,12 +170,12 @@ pub fn outdent_selection(buffer: &TextBuffer) {
     let end_line = end_iter.line();
 
     // Store the original selection marks to restore them later
-    let original_selection_start_mark = if has_selection {
+    let original_selection_start_mark = if initial_selection_bounds.is_some() {
         Some(buffer.create_mark(None, &start_iter, false))
     } else {
         None
     };
-    let original_selection_end_mark = if has_selection {
+    let original_selection_end_mark = if initial_selection_bounds.is_some() {
         Some(buffer.create_mark(None, &end_iter, false))
     } else {
         None
@@ -189,7 +215,7 @@ pub fn outdent_selection(buffer: &TextBuffer) {
     buffer.end_user_action();
 
     // Restore the selection
-    if has_selection {
+    if initial_selection_bounds.is_some() {
         if let (Some(start_mark), Some(end_mark)) = (original_selection_start_mark, original_selection_end_mark) {
             let new_start_iter = buffer.iter_at_mark(&start_mark);
             let new_end_iter = buffer.iter_at_mark(&end_mark);

@@ -1,3 +1,8 @@
+//! Module for search and replace functionality
+//!
+//! This module provides functions for searching text in buffers, finding
+//! matching brackets, and replacing text with support for regex patterns.
+
 use gtk4::TextBuffer;
 use gtk4::prelude::*;
 use regex::Regex;

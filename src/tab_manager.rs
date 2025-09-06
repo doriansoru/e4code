@@ -1,30 +1,55 @@
+//! Module for tab management
+//!
+//! This module provides functions for creating, opening, closing, and managing
+//! editor tabs, including file operations and user interaction handling.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box, Button, Label, Notebook, ScrolledWindow, TextBuffer,
-    TextView,
+    ApplicationWindow, Box, Button, Label, Notebook, ScrolledWindow, TextBuffer,
 };
 
-use gtk4::pango;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::ui::components::{create_line_numbers_area, create_text_view_with_line_numbers};
 use crate::utils::add_zoom_controllers_to_text_view;
 
+/// Opens a file in a new tab
+///
+/// This function opens the specified file in a new tab, or switches to an
+/// existing tab if the file is already open. It handles file reading,
+/// buffer creation, and UI setup.
+///
+/// # Arguments
+///
+/// * `path` - Path to the file to open
+/// * `notebook` - Reference to the notebook widget managing tabs
+/// * `highlight_closure` - Function to apply syntax highlighting
+/// * `buffer_paths` - Map of buffers to their file paths
+/// * `app` - Reference to the GTK application
+/// * `current_font_desc` - Current font description
+/// * `update_font` - Function to update the font
+/// * `initial_font_size` - Initial font size
+/// * `setup_buffer_connections` - Function to set up buffer connections
+use crate::AppContext; // Add this use statement
+
 pub fn open_file_in_new_tab(
     path: &PathBuf,
-    notebook: &Notebook,
-    highlight_closure: &Rc<dyn Fn(TextBuffer) + 'static>,
-    buffer_paths: &Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
-    app: &Application,
-    current_font_desc: &Rc<RefCell<pango::FontDescription>>,
-    update_font: &Rc<dyn Fn(&pango::FontDescription) + 'static>,
-    initial_font_size: &Rc<RefCell<f64>>,
-    setup_buffer_connections: &Rc<dyn Fn(&TextBuffer, &TextView)>,
+    app_context: &Rc<RefCell<AppContext>>,
 ) {
+    let context = app_context.borrow();
+    let notebook = &context.notebook;
+    let highlight_closure = &context.syntax_context.borrow().highlight_closure;
+    let buffer_paths = &context.buffer_paths;
+    let app = &context.app;
+    let current_font_desc = &context.current_font_desc;
+    let update_font = &context.update_font;
+    let initial_font_size = &context.initial_font_size;
+    let setup_buffer_connections = &context.setup_buffer_connections;
+
     // Check if the file is already open in a tab
     // Use a block to limit the scope of the immutable borrow
     {
@@ -147,16 +172,33 @@ pub fn open_file_in_new_tab(
 }
 
 /// Creates a new untitled file tab
+///
+/// This function creates a new empty tab for an untitled file, with a
+/// generated name like "Untitled-1", "Untitled-2", etc.
+///
+/// # Arguments
+///
+/// * `notebook` - Reference to the notebook widget managing tabs
+/// * `highlight_closure` - Function to apply syntax highlighting
+/// * `buffer_paths` - Map of buffers to their file paths
+/// * `app` - Reference to the GTK application
+/// * `current_font_desc` - Current font description
+/// * `update_font` - Function to update the font
+/// * `initial_font_size` - Initial font size
+/// * `setup_buffer_connections` - Function to set up buffer connections
 pub fn create_new_file_tab(
-    notebook: &Notebook,
-    highlight_closure: &Rc<dyn Fn(TextBuffer) + 'static>,
-    buffer_paths: &Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
-    app: &Application,
-    current_font_desc: &Rc<RefCell<pango::FontDescription>>,
-    update_font: &Rc<dyn Fn(&pango::FontDescription) + 'static>,
-    initial_font_size: &Rc<RefCell<f64>>,
-    setup_buffer_connections: &Rc<dyn Fn(&TextBuffer, &TextView)>,
+    app_context: &Rc<RefCell<AppContext>>,
 ) {
+    let context = app_context.borrow();
+    let notebook = &context.notebook;
+    let highlight_closure = &context.syntax_context.borrow().highlight_closure;
+    let buffer_paths = &context.buffer_paths;
+    let app = &context.app;
+    let current_font_desc = &context.current_font_desc;
+    let update_font = &context.update_font;
+    let initial_font_size = &context.initial_font_size;
+    let setup_buffer_connections = &context.setup_buffer_connections;
+
     // Create a new empty buffer
     let new_buffer = gtk4::TextBuffer::builder().text("").build();
     // Setup standard buffer tags
@@ -260,6 +302,19 @@ pub fn create_new_file_tab(
     highlight_closure(new_buffer.clone());
 }
 
+/// Checks if a buffer has been modified
+///
+/// This function compares the current content of a buffer with the content
+/// of its associated file (if any) to determine if it has been modified.
+///
+/// # Arguments
+///
+/// * `buffer` - Reference to the text buffer to check
+/// * `file_path` - Optional reference to the file path associated with the buffer
+///
+/// # Returns
+///
+/// True if the buffer has been modified, false otherwise
 pub fn is_buffer_modified(buffer: &TextBuffer, file_path: Option<&PathBuf>) -> bool {
     crate::file_operations::is_buffer_modified(buffer, file_path)
 }
@@ -380,6 +435,18 @@ pub fn prompt_save_changes_async<F>(
 }
 
 /// Saves the content of a buffer to a file
+///
+/// This function writes the entire content of a text buffer to a file.
+///
+/// # Arguments
+///
+/// * `_parent` - Parent window (unused in current implementation)
+/// * `buffer` - Reference to the text buffer to save
+/// * `file_path` - Path to the file to save to
+///
+/// # Returns
+///
+/// Result indicating success or failure
 pub fn save_buffer_to_file(
     _parent: &impl IsA<gtk4::Window>,
     buffer: &TextBuffer,
@@ -391,6 +458,17 @@ pub fn save_buffer_to_file(
     std::fs::write(file_path, content)
 }
 
+/// Closes a specific tab
+///
+/// This function closes the tab at the specified page number, prompting
+/// the user to save changes if the buffer has been modified.
+///
+/// # Arguments
+///
+/// * `window` - Reference to the application window
+/// * `notebook` - Reference to the notebook widget managing tabs
+/// * `buffer_paths` - Map of buffers to their file paths
+/// * `page_num` - Page number of the tab to close
 pub fn close_tab(
     window: &ApplicationWindow,
     notebook: &Notebook,
@@ -424,6 +502,15 @@ pub fn close_tab(
 }
 
 /// Closes the current tab with save prompt if needed
+///
+/// This function closes the currently active tab, prompting the user
+/// to save changes if the buffer has been modified.
+///
+/// # Arguments
+///
+/// * `window` - Reference to the application window
+/// * `notebook` - Reference to the notebook widget managing tabs
+/// * `buffer_paths` - Map of buffers to their file paths
 pub fn close_current_tab(
     window: &ApplicationWindow,
     notebook: &Notebook,
@@ -435,6 +522,15 @@ pub fn close_current_tab(
 }
 
 /// Closes all tabs with save prompts if needed, handling each tab individually
+///
+/// This function closes all open tabs, prompting the user to save changes
+/// for each modified buffer.
+///
+/// # Arguments
+///
+/// * `window` - Reference to the application window
+/// * `notebook` - Reference to the notebook widget managing tabs
+/// * `buffer_paths` - Map of buffers to their file paths
 pub fn close_all_tabs_with_prompts(
     window: ApplicationWindow,
     notebook: Notebook,
@@ -509,6 +605,19 @@ pub fn close_all_tabs_with_prompts(
     process_next_buffer(window, notebook, buffer_paths, buffers_to_check);
 }
 
+/// Gets the paths of all open files
+///
+/// This function returns a vector containing the file paths of all
+/// currently open files in the editor.
+///
+/// # Arguments
+///
+/// * `notebook` - Reference to the notebook widget managing tabs
+/// * `buffer_paths` - Map of buffers to their file paths
+///
+/// # Returns
+///
+/// Vector of file paths for all open files
 pub fn get_open_file_paths(
     notebook: &Notebook,
     buffer_paths: &Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,

@@ -1,3 +1,8 @@
+//! UI components module
+//!
+//! This module provides reusable UI components used throughout the application,
+//! such as line number areas and text view containers.
+
 use gtk4::pango;
 use gtk4::prelude::*;
 use gtk4::{DrawingArea, Orientation, ScrolledWindow, TextView};
@@ -5,10 +10,25 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 // Constants for line numbers
+/// Width of the line numbers area in pixels
 pub const LINE_NUMBER_WIDTH: i32 = 50;
+/// Padding around line numbers in pixels
 pub const LINE_NUMBER_PADDING: f64 = 5.0;
 
 /// Creates a line numbers area widget for a text view
+///
+/// This function creates a drawing area that displays line numbers alongside
+/// a text view, automatically updating as the text content changes.
+///
+/// # Arguments
+///
+/// * `text_view` - The text view to display line numbers for
+/// * `scrolled_window` - The scrolled window containing the text view
+/// * `current_font_desc` - Reference to the current font description
+///
+/// # Returns
+///
+/// A drawing area widget that displays line numbers
 pub fn create_line_numbers_area(
     text_view: &TextView,
     scrolled_window: &ScrolledWindow,
@@ -98,6 +118,19 @@ pub fn create_line_numbers_area(
 }
 
 /// Creates a text view with line numbers in a horizontal box
+///
+/// This function creates a container that holds both a line numbers area
+/// and a text view, arranging them horizontally.
+///
+/// # Arguments
+///
+/// * `_text_view` - The text view (unused in current implementation)
+/// * `scrolled_window` - The scrolled window containing the text view
+/// * `line_numbers_area` - The line numbers area to display
+///
+/// # Returns
+///
+/// A horizontal box containing the line numbers area and text view
 pub fn create_text_view_with_line_numbers(
     _text_view: &TextView,
     scrolled_window: &ScrolledWindow,

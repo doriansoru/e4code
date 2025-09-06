@@ -1,3 +1,8 @@
+//! Utility functions for the E4Code application
+//!
+//! This module provides various utility functions used throughout the application,
+//! such as zoom controllers for text views.
+
 use gtk4::gdk;
 use gtk4::pango;
 use gtk4::prelude::*;
@@ -6,6 +11,18 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Adds zoom controllers to a text view
+///
+/// This function adds keyboard and scroll wheel zoom functionality to a text view,
+/// allowing users to zoom in and out using Ctrl+Plus, Ctrl+Minus, Ctrl+0, or
+/// Ctrl+scroll wheel.
+///
+/// # Arguments
+///
+/// * `text_view` - The text view to add zoom controllers to
+/// * `current_font_desc` - Reference to the current font description
+/// * `update_font` - Function to update the font
+/// * `app` - Reference to the GTK application
+/// * `initial_font_size` - Reference to the initial font size
 pub fn add_zoom_controllers_to_text_view(
     text_view: &TextView,
     current_font_desc: Rc<RefCell<pango::FontDescription>>,

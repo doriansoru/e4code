@@ -1,7 +1,24 @@
+//! Search dialog UI module
+//!
+//! This module provides the search and replace dialog functionality for the application.
+
 use gtk4::prelude::*;
 use gtk4::{Align, Box, CheckButton, Dialog, Entry, Label, Orientation, ResponseType};
 
 /// Creates a search and replace dialog
+///
+/// This function creates a dialog window with controls for searching and
+/// replacing text, including options for case sensitivity, whole word matching,
+/// and regular expressions.
+///
+/// # Arguments
+///
+/// * `parent` - Parent window for the dialog
+/// * `initial_text` - Initial text to populate the search field with
+///
+/// # Returns
+///
+/// A tuple containing the dialog and its child widgets for further manipulation
 pub fn create_search_replace_dialog(
     parent: &impl IsA<gtk4::Window>,
     initial_text: &str,

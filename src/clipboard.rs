@@ -1,3 +1,8 @@
+//! Module for clipboard operations
+//!
+//! This module provides functions for copying, cutting, and pasting text
+//! within the application using the system clipboard.
+
 use gtk4::prelude::*;
 use gtk4::{TextBuffer, TextView};
 

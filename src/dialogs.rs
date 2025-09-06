@@ -1,3 +1,8 @@
+//! Module for creating and managing dialogs
+//!
+//! This module provides functions for creating various types of dialogs
+//! used throughout the application, such as error dialogs.
+
 use gtk4::prelude::*;
 use gtk4::{ButtonsType, MessageDialog};
 

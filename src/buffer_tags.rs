@@ -1,3 +1,8 @@
+//! Module for managing text buffer tags
+//!
+//! This module provides functions for setting up standard tags that are used
+//! in text buffers for features like syntax highlighting and bracket matching.
+
 use gtk4::prelude::*;
 use gtk4::{TextBuffer, TextTag};
 

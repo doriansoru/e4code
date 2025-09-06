@@ -1,9 +1,16 @@
+//! Main module for the E4Code application
+//!
+//! This module sets up the GTK application, initializes the main window,
+//! and manages the core application context.
+
 mod actions;
 mod buffer_tags;
+mod change_tracker;
 mod clipboard;
 mod dialogs;
 mod file_operations;
 mod indentation;
+mod incremental_highlighting;
 pub mod search;
 mod settings;
 mod syntax_highlighting;
@@ -20,7 +27,7 @@ use gtk4::{
 use std::collections::HashMap;
 
 use gtk4::pango;
-use syntect::highlighting::{Theme, ThemeSet};
+use syntect::highlighting::ThemeSet;
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 use std::cell::RefCell;
@@ -34,30 +41,68 @@ use settings::{AppSettings, load_settings, save_settings};
 use file_operations::populate_tree_view;
 
 use gio::{self};
+use syntax_highlighting::{SyntaxHighlightingContext};
+use change_tracker::ChangeTracker;
 
+/// Application context containing all shared state and components
+///
+/// This struct holds references to all the major components of the application
+/// including the GTK application, settings, buffers, syntax highlighting components,
+/// and UI elements.
 pub struct AppContext {
+    /// The GTK application instance
     pub app: Application,
+    /// Application settings
     pub app_settings: Rc<RefCell<AppSettings>>,
+    /// Map of text buffers to their file paths
     pub buffer_paths: Rc<RefCell<HashMap<gtk4::TextBuffer, PathBuf>>>,
-    pub ps: Rc<SyntaxSet>,
-    pub ts: Rc<ThemeSet>,
-    pub syntax: Rc<SyntaxReference>,
-    pub current_theme: Rc<RefCell<Theme>>,
+    /// Syntax highlighting context
+    pub syntax_context: Rc<RefCell<SyntaxHighlightingContext>>,
+    /// Current font description
     pub current_font_desc: Rc<RefCell<pango::FontDescription>>,
+    /// Function to update the font
     pub update_font: Rc<dyn Fn(&pango::FontDescription)>,
+    /// Initial font size
     pub initial_font_size: Rc<RefCell<f64>>,
+    /// Status bar label
     pub status_bar: Rc<RefCell<Label>>,
+    /// Last line number tracked
     pub last_line: Rc<RefCell<u32>>,
+    /// Last column number tracked
     pub last_col: Rc<RefCell<u32>>,
+    /// Function to set up buffer connections
     pub setup_buffer_connections: Rc<dyn Fn(&TextBuffer, &TextView)>,
+    /// Tree store for the file tree view
     pub tree_store: TreeStore,
+    /// Notebook for tab management
     pub notebook: Notebook,
+    /// Main application window
     pub window: ApplicationWindow,
-    pub highlight_closure: Rc<dyn Fn(TextBuffer)>,
+    /// Timer for syntax highlighting
     pub syntax_highlight_timer: Rc<RefCell<Option<glib::SourceId>>>,
+    /// Track last changed line for incremental highlighting
+    pub last_changed_line: Rc<RefCell<HashMap<TextBuffer, i32>>>,
+    /// Change trackers for each buffer
+    pub change_trackers: Rc<RefCell<HashMap<TextBuffer, ChangeTracker>>>,
 }
 
 impl AppContext {
+    /// Creates a new application context and initializes the main window
+    ///
+    /// This function sets up the entire application, including:
+    /// - Loading settings
+    /// - Creating the main window and UI elements
+    /// - Setting up the file tree view
+    /// - Initializing syntax highlighting
+    /// - Setting up menus and actions
+    ///
+    /// # Arguments
+    ///
+    /// * `app` - The GTK application instance
+    ///
+    /// # Returns
+    ///
+    /// A reference-counted pointer to the new application context
     fn new(app: &Application) -> Rc<RefCell<Self>> {
         // --- Initial Setup ---
         let app_settings = Rc::new(RefCell::new(load_settings()));
@@ -156,12 +201,13 @@ impl AppContext {
                 let family = font_desc.family().unwrap_or("Monospace".into());
                 let size_pts = font_desc.size() as f64 / pango::SCALE as f64;
                 let css = format!(
-                    r#"textview {{ font-family: "{}"; font-size: {}pt; }}"#,
-                    family, size_pts
+                    r#"textview {{ font-family: \"{}\"; font-size: {}pt; }}"#,
+                    family,
+                    size_pts
                 );
                 provider.load_from_data(&css);
 
-                // Redraw the current tab's line number area and queue a resize for the window
+                // Redraw the current tab\'s line number area and queue a resize for the window
                 if let Some(page_num) = notebook_clone_for_font_update.current_page() {
                     if let Some(page) = notebook_clone_for_font_update.nth_page(Some(page_num)) {
                         if let Some(text_view_with_line_numbers_box) =
@@ -185,14 +231,14 @@ impl AppContext {
         // --- Controllers and Signals ---
         let initial_font_size_from_settings = {
             let font_str = &app_settings.borrow().font;
-            // Parse the font size from the font string (e.g., "Monospace 14" -> 14.0)
-            let parts: Vec<&str> = font_str.split_whitespace().collect();
-            if parts.len() >= 2 {
-                parts
-                    .last()
-                    .unwrap_or(&"14.0")
-                    .parse::<f64>()
-                    .unwrap_or(14.0)
+            // Use regex to parse the font size from the font string (e.g., "Monospace 14" -> 14.0)
+            let re = regex::Regex::new(r"(\d+(\.\d+)?)$").unwrap();
+            if let Some(captures) = re.captures(font_str) {
+                if let Some(size_str) = captures.get(1) {
+                    size_str.as_str().parse::<f64>().unwrap_or(14.0)
+                } else {
+                    14.0
+                }
             } else {
                 14.0
             }
@@ -211,54 +257,132 @@ impl AppContext {
 
         // Initialize these Rc<RefCell>s here
         let syntax_highlight_timer = Rc::new(RefCell::new(None::<glib::SourceId>));
+        let last_changed_line = Rc::new(RefCell::new(HashMap::new()));
+        let change_trackers = Rc::new(RefCell::new(HashMap::<TextBuffer, ChangeTracker>::new()));
 
-        // --- Main Closures ---
-
+        // Create syntax_context with highlight_closure
         let highlight_closure: Rc<dyn Fn(TextBuffer)> = Rc::new({
             let syntax = syntax.clone();
             let ps = ps.clone();
             let current_theme = current_theme.clone();
+            let change_trackers_highlight = change_trackers.clone();
+            let syntax_context_ref = Rc::new(RefCell::new(None::<SyntaxHighlightingContext>));
 
             move |buffer: TextBuffer| {
-                syntax_highlighting::apply_syntax_highlighting(
-                    &buffer,
-                    &*syntax,
-                    &ps,
-                    &current_theme.borrow(),
-                );
+                // Check if this is the first time highlighting (initial load)
+                let is_initial_highlight = {
+                    let trackers = change_trackers_highlight.borrow();
+                    if let Some(tracker) = trackers.get(&buffer) {
+                        !tracker.has_changes()
+                    } else {
+                        true // No tracker found, treat as initial
+                    }
+                };
+                
+                if is_initial_highlight {
+                    // For initial highlighting, use the full document approach
+                    syntax_highlighting::apply_syntax_highlighting(
+                        &buffer,
+                        &*syntax,
+                        &ps,
+                        &current_theme.borrow(),
+                    );
+                } else {
+                    // For incremental highlighting, use the changed lines
+                    let trackers = change_trackers_highlight.borrow();
+                    if let Some(tracker) = trackers.get(&buffer) {
+                        if tracker.has_changes() {
+                            let changed_lines = tracker.changed_lines.clone();
+                            // Get the syntax context from the RefCell
+                            if let Some(ref context) = *syntax_context_ref.borrow() {
+                                incremental_highlighting::apply_incremental_highlighting(
+                                    &buffer,
+                                    context,
+                                    &changed_lines,
+                                );
+                            }
+                        }
+                    }
+                }
             }
         });
 
+        let syntax_context = Rc::new(RefCell::new(SyntaxHighlightingContext::new(
+            ps,
+            ts,
+            syntax,
+            current_theme,
+            highlight_closure,
+        )));
+
         // --- Helper Function for Buffer Connections ---
         let setup_buffer_connections: Rc<dyn Fn(&TextBuffer, &TextView)> = {
-            let highlight_closure = highlight_closure.clone();
+            let syntax_context_clone = syntax_context.clone();
             let status_bar = status_bar.clone();
             let last_line = last_line.clone();
             let last_col = last_col.clone();
             let syntax_highlight_timer = syntax_highlight_timer.clone();
+            let change_trackers = change_trackers.clone();
 
             Rc::new(move |buffer: &TextBuffer, text_view: &TextView| {
                 // Create the brackets state
                 let prev_bracket_pos1 = Rc::new(RefCell::new(None));
                 let prev_bracket_pos2 = Rc::new(RefCell::new(None));
+                
+                // Initialize change tracker for this buffer
+                change_trackers.borrow_mut().insert(buffer.clone(), ChangeTracker::new());
+                
                 // connect_changed
-                let highlight_closure_clone = highlight_closure.clone();
+                let syntax_context_clone_for_highlight = syntax_context_clone.clone();
                 let syntax_highlight_timer_clone = syntax_highlight_timer.clone();
+                let change_trackers_clone = change_trackers.clone();
                 buffer.connect_changed(move |buf| {
+                    // Track the changes for incremental highlighting
+                    let mut trackers = change_trackers_clone.borrow_mut();
+                    if let Some(tracker) = trackers.get_mut(buf) {
+                        // For now, we'll mark all lines as changed to maintain compatibility
+                        // In a more advanced implementation, we would track specific insertions/deletions
+                        for i in 0..buf.line_count() {
+                            tracker.changed_lines.insert(i);
+                        }
+                    }
+                    drop(trackers); // Release the borrow
+                    
                     // Cancel any existing timer
                     if let Some(source_id) = syntax_highlight_timer_clone.borrow_mut().take() {
                         source_id.remove();
                     }
 
                     let buf_clone = buf.clone();
-                    let highlight_closure_clone_inner = highlight_closure_clone.clone();
+                    let syntax_context_clone_inner = syntax_context_clone_for_highlight.clone();
                     let timer_ref = syntax_highlight_timer_clone.clone();
+                    let change_trackers_timer_clone = change_trackers_clone.clone();
 
-                    // Set a new timer
+                    // Set a new timer with a shorter delay for more responsive highlighting
                     let source_id = glib::timeout_add_local_once(
-                        std::time::Duration::from_millis(200),
+                        std::time::Duration::from_millis(30), // Further reduced delay for responsiveness
                         move || {
-                            highlight_closure_clone_inner(buf_clone);
+                            // Apply incremental highlighting
+                            let trackers = change_trackers_timer_clone.borrow();
+                            if let Some(tracker) = trackers.get(&buf_clone) {
+                                if tracker.has_changes() {
+                                    let changed_lines = tracker.changed_lines.clone();
+                                    incremental_highlighting::apply_incremental_highlighting(
+                                        &buf_clone,
+                                        &syntax_context_clone_inner.borrow(),
+                                        &changed_lines,
+                                    );
+                                }
+                            }
+                            drop(trackers); // Release the borrow
+                            
+                            // Clear the changed lines and timer ID
+                            let mut trackers = change_trackers_timer_clone.borrow_mut();
+                            if let Some(tracker) = trackers.get_mut(&buf_clone) {
+                                tracker.changed_lines.clear();
+                            }
+                            drop(trackers); // Release the borrow
+                            
                             *timer_ref.borrow_mut() = None; // Clear the timer ID once it fires
                         },
                     );
@@ -328,10 +452,7 @@ impl AppContext {
             app: app.clone(),
             app_settings,
             buffer_paths,
-            ps,
-            ts,
-            syntax,
-            current_theme,
+            syntax_context,
             current_font_desc,
             update_font,
             initial_font_size,
@@ -342,9 +463,9 @@ impl AppContext {
             tree_store: tree_store_clone,
             notebook: notebook_clone,
             window: window_clone,
-            highlight_closure,
-
             syntax_highlight_timer,
+            last_changed_line,
+            change_trackers,
         }));
 
 
@@ -390,7 +511,7 @@ impl AppContext {
         header_bar.pack_start(&help_menu_button);
 
         // --- Action Definitions ---
-        setup_actions(&new_context_rc);
+        setup_actions(new_context_rc.clone());
 
         // Populate the tree view with the initial directory
         populate_tree_view(&tree_store, &initial_directory);
@@ -408,14 +529,7 @@ impl AppContext {
                     if path.is_file() {
                         tab_manager::open_file_in_new_tab(
                             &path,
-                            &context.notebook,
-                            &context.highlight_closure,
-                            &context.buffer_paths,
-                            &context.app,
-                            &context.current_font_desc,
-                            &context.update_font,
-                            &context.initial_font_size,
-                            &context.setup_buffer_connections,
+                            &app_context_clone_tree_view,
                         );
                     } else if path.is_dir() {
                         open_directory_in_tree(
@@ -432,10 +546,75 @@ impl AppContext {
         main_paned.set_end_child(Some(&vbox));
         window.set_child(Some(&main_paned));
 
+        // Connect to the window's close-request signal to handle unsaved changes
+        let app_context_clone_for_window_close = new_context_rc.clone();
+        window.connect_close_request(move |_window| {
+            let context = app_context_clone_for_window_close.borrow();
+            
+            // Check if any files have unsaved changes
+            let (has_unsaved_changes, first_unsaved_buffer, first_unsaved_file_path, first_unsaved_page_index) = {
+                let mut has_unsaved_changes = false;
+                let mut first_unsaved_buffer = None;
+                let mut first_unsaved_file_path = None;
+                let mut first_unsaved_page_index = 0;
+
+                for i in 0..context.notebook.n_pages() {
+                    if let Some(page) = context.notebook.nth_page(Some(i)) {
+                        if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                            let buffer = text_view.buffer();
+                            let buffer_paths_borrowed = context.buffer_paths.borrow();
+                            let file_path = buffer_paths_borrowed.get(&buffer).cloned();
+
+                            if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
+                                has_unsaved_changes = true;
+                                first_unsaved_buffer = Some(buffer);
+                                first_unsaved_file_path = file_path;
+                                first_unsaved_page_index = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+                (has_unsaved_changes, first_unsaved_buffer, first_unsaved_file_path, first_unsaved_page_index)
+            }; // End of the block that defines the variables
+
+            if has_unsaved_changes {
+                if let Some(buffer) = first_unsaved_buffer {
+                    let app_context_clone_for_prompt = app_context_clone_for_window_close.clone();
+
+                    tab_manager::prompt_save_changes_async(
+                        &context.window,
+                        buffer,
+                        first_unsaved_file_path,
+                        context.buffer_paths.clone(),
+                        context.notebook.clone(),
+                        first_unsaved_page_index as u32,
+                        move |proceed| {
+                            if proceed {
+                                // User wants to proceed with closing the window
+                                app_context_clone_for_prompt.borrow().app.quit();
+                            }
+                            // If not proceed, the user cancelled, so we don't close the window
+                        },
+                    );
+                }
+                // Return Inhibit(true) to prevent the window from closing immediately
+                glib::Propagation::Stop
+            } else {
+                // No unsaved changes, allow the window to close
+                glib::Propagation::Proceed
+            }
+        });
+
         new_context_rc
     }
 }
 
+/// Entry point for the E4Code application
+///
+/// This function initializes the GTK application and sets up the main event loop.
+/// It handles both activation (when the app is launched without arguments) and
+/// opening files (when files are passed as command line arguments).
 fn main() -> glib::ExitCode {
     let app = Application::builder()
         .application_id("com.e4code.editor")
@@ -471,14 +650,7 @@ fn main() -> glib::ExitCode {
                             if path.is_file() {
                                 tab_manager::open_file_in_new_tab(
                                     &path,
-                                    &new_context.borrow().notebook,
-                                    &new_context.borrow().highlight_closure,
-                                    &new_context.borrow().buffer_paths,
-                                    &new_context.borrow().app,
-                                    &new_context.borrow().current_font_desc,
-                                    &new_context.borrow().update_font,
-                                    &new_context.borrow().initial_font_size,
-                                    &new_context.borrow().setup_buffer_connections,
+                                    &new_context,
                                 );
                                 opened_any_file = true;
                             }
@@ -488,14 +660,7 @@ fn main() -> glib::ExitCode {
                 // If no files were opened (neither from command line nor from settings), create a new untitled tab
                 if !opened_any_file {
                     tab_manager::create_new_file_tab(
-                        &new_context.borrow().notebook,
-                        &new_context.borrow().highlight_closure,
-                        &new_context.borrow().buffer_paths,
-                        &new_context.borrow().app,
-                        &new_context.borrow().current_font_desc,
-                        &new_context.borrow().update_font,
-                        &new_context.borrow().initial_font_size,
-                        &new_context.borrow().setup_buffer_connections,
+                        &new_context,
                     );
                 }
                 *app_context_clone.borrow_mut() = Some(new_context);
@@ -522,14 +687,7 @@ fn main() -> glib::ExitCode {
                         if path.is_file() {
                             tab_manager::open_file_in_new_tab(
                                 &path,
-                                &context.notebook,
-                                &context.highlight_closure,
-                                &context.buffer_paths,
-                                &context.app,
-                                &context.current_font_desc,
-                                &context.update_font,
-                                &context.initial_font_size,
-                                &context.setup_buffer_connections,
+                                context_ref,
                             );
                         } else if path.is_dir() {
                             open_directory_in_tree(
