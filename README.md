@@ -41,3 +41,5 @@ This editor will have the following functions:
 *   **Tabbed Interface:** Supports opening multiple files in separate tabs.
 
 *   **Directory Tree:** Will have a tree view for the currently open directory.
+
+<img width="800" height="437" alt="image" src="https://github.com/user-attachments/assets/c3986458-b3f4-4e12-a867-26d20835dbf1" />

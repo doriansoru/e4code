@@ -35,13 +35,17 @@ use crate::search;
 ///
 /// * `path` - The path to the directory to open
 /// * `app_context` - Reference to the application context
-pub fn open_directory_in_tree(
-    path: &PathBuf,
-    app_context: &Rc<RefCell<AppContext>>,
-) {
-    crate::file_operations::populate_tree_view(&app_context.borrow().tree_store, path);
-    app_context.borrow_mut().app_settings.borrow_mut().last_opened_directory = Some(path.clone());
-    save_settings(&app_context.borrow().app_settings.borrow());
+pub fn open_directory_in_tree(path: &PathBuf, app_context: Rc<RefCell<AppContext>>) {
+    // Get an immutable borrow of app_context first
+    let app_context_borrow = app_context.borrow();
+
+    // Now use this borrow to access tree_store
+    crate::file_operations::populate_tree_view(&app_context_borrow.tree_store, path);
+
+    // Get a mutable borrow of app_settings
+    let mut app_settings_mut = app_context_borrow.app_settings.borrow_mut();
+    app_settings_mut.last_opened_directory = Some(path.clone());
+    save_settings(&app_settings_mut);
 }
 
 

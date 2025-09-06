@@ -534,7 +534,7 @@ impl AppContext {
                     } else if path.is_dir() {
                         open_directory_in_tree(
                             &path,
-                            &app_context_clone_tree_view,
+                            app_context_clone_tree_view.clone(),
                         );
                     }
                 }
@@ -692,7 +692,7 @@ fn main() -> glib::ExitCode {
                         } else if path.is_dir() {
                             open_directory_in_tree(
                                 &path,
-                                context_ref,
+                                context_ref.clone(),
                             );
                         }
                     }

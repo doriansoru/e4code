@@ -60,14 +60,16 @@ pub fn open_directory_dialog(
 
     folder_chooser.connect_response(move |dialog, response| {
         if response == ResponseType::Accept {
+            dialog.close();
             if let Some(folder) = dialog.file() {
                 if let Some(path) = folder.path() {
                     // Pass app_context directly
-                    crate::actions::open_directory_in_tree(&path, &app_context);
+                    crate::actions::open_directory_in_tree(&path, app_context.clone());
                 }
             }
+        } else {
+            dialog.close();
         }
-        dialog.close();
     });
     folder_chooser.present();
 }
