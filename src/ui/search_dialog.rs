@@ -5,6 +5,9 @@
 use gtk4::prelude::*;
 use gtk4::{Align, Box, CheckButton, Dialog, Entry, Label, Orientation, ResponseType};
 
+pub const RESPONSE_TYPE_FIND_PREVIOUS: ResponseType = ResponseType::Other(0);
+pub const RESPONSE_TYPE_REPLACE_ALL: ResponseType = ResponseType::Other(1);
+
 /// Creates a search and replace dialog
 ///
 /// This function creates a dialog window with controls for searching and
@@ -37,10 +40,10 @@ pub fn create_search_replace_dialog(
         .modal(true)
         .build();
 
-    dialog.add_button("Find Previous", ResponseType::Other(0));
+    dialog.add_button("Find Previous", RESPONSE_TYPE_FIND_PREVIOUS);
     dialog.add_button("Find Next", ResponseType::Ok);
     dialog.add_button("Replace", ResponseType::Apply);
-    dialog.add_button("Replace All", ResponseType::Other(1));
+    dialog.add_button("Replace All", RESPONSE_TYPE_REPLACE_ALL);
     dialog.add_button("Cancel", ResponseType::Cancel);
 
     let content_area = dialog.content_area();

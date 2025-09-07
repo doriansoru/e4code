@@ -103,15 +103,22 @@ pub fn update_tab_label(
 }
 
 /// Opens a file chooser dialog for saving files
+///
+/// # Arguments
+///
+/// * `parent` - The parent window for the dialog (passed by value).
+/// * `buffer` - The TextBuffer whose content is to be saved.
+/// * `buffer_paths` - A shared map of TextBuffers to their file paths.
+/// * `notebook` - An optional Notebook to update the tab label after saving.
 pub fn save_file_dialog(
-    parent: &impl IsA<gtk4::Window>,
+    parent: gtk4::Window,
     buffer: gtk4::TextBuffer,
     buffer_paths: Rc<RefCell<std::collections::HashMap<gtk4::TextBuffer, PathBuf>>>,
     notebook: Option<gtk4::Notebook>, // Optional notebook to update tab label
 ) {
     let file_chooser = FileChooserDialog::builder()
         .title("Save File")
-        .transient_for(parent)
+        .transient_for(&parent)
         .modal(true)
         .action(FileChooserAction::Save)
         .build();
@@ -146,8 +153,11 @@ pub fn save_file_dialog(
                             }
                         }
                         Err(e) => {
-                            eprintln!("Error saving file: {}", e);
-                            // TODO: Show error dialog
+                            crate::dialogs::show_error_dialog(
+                                &parent,
+                                "Error saving file",
+                                &format!("Could not save file: {}", e),
+                            );
                         }
                     }
                 }
@@ -159,7 +169,13 @@ pub fn save_file_dialog(
 }
 
 /// Populates the tree view with directory contents
-pub fn populate_tree_view(tree_store: &TreeStore, path: &std::path::Path) {
+///
+/// # Arguments
+///
+/// * `parent` - The parent window for displaying error dialogs.
+/// * `tree_store` - The TreeStore to populate.
+/// * `path` - The path to the directory to read.
+pub fn populate_tree_view(parent: &impl IsA<gtk4::Window>, tree_store: &TreeStore, path: &std::path::Path) {
     tree_store.clear();
 
     // Add ".." entry if not at the root
@@ -173,36 +189,30 @@ pub fn populate_tree_view(tree_store: &TreeStore, path: &std::path::Path) {
     }
 
     if let Ok(entries) = fs::read_dir(path) {
-        // Separate directories and files for sorting
-        let mut directories = Vec::new();
-        let mut files = Vec::new();
+        // Collect all entries for sorting
+        let mut all_entries: Vec<_> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| {
+                let entry_path = entry.path();
+                (entry_path.clone(), entry_path.is_dir())
+            })
+            .collect();
 
-        for entry in entries.flatten() {
-            let entry_path = entry.path();
-            if entry_path.is_dir() {
-                directories.push(entry_path);
-            } else {
-                files.push(entry_path);
+        // Sort all entries at once, directories first, then alphabetically
+        all_entries.sort_by(|a, b| {
+            // If one is directory and other is file, directory comes first
+            match (a.1, b.1) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => {
+                    // Both are same type, sort alphabetically
+                    a.0.file_name().cmp(&b.0.file_name())
+                }
             }
-        }
+        });
 
-        // Sort directories and files alphabetically
-        directories.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-        files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-
-        // Add sorted directories
-        for entry_path in directories {
-            let file_name = entry_path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            let full_path = entry_path.to_str().unwrap_or("").to_string();
-            tree_store.insert_with_values(None, None, &[(0, &file_name), (1, &full_path)]);
-        }
-
-        // Add sorted files
-        for entry_path in files {
+        // Add sorted entries
+        for (entry_path, _is_dir) in all_entries {
             let file_name = entry_path
                 .file_name()
                 .and_then(|s| s.to_str())
@@ -212,19 +222,26 @@ pub fn populate_tree_view(tree_store: &TreeStore, path: &std::path::Path) {
             tree_store.insert_with_values(None, None, &[(0, &file_name), (1, &full_path)]);
         }
     } else {
-        eprintln!("Error reading directory: {:?}", path);
+        crate::dialogs::show_error_dialog(
+            parent,
+            "Error reading directory",
+            &format!("Could not read directory: {:?}", path),
+        );
     }
 }
 
 /// Utility function to check if a buffer has unsaved changes
 pub fn is_buffer_modified(buffer: &gtk4::TextBuffer, file_path: Option<&PathBuf>) -> bool {
     if let Some(path) = file_path {
+        // Try to read the file content
         if let Ok(content_on_disk) = std::fs::read_to_string(path) {
             let buffer_content = buffer
                 .text(&buffer.start_iter(), &buffer.end_iter(), false)
                 .to_string();
             return buffer_content != content_on_disk;
         }
+        // If we can't read the file, it might have been deleted
+        // In that case, if the buffer has content, we consider it modified
     }
     // If file doesn't exist on disk or can't be read, consider it modified if it has content
     let start = buffer.start_iter();

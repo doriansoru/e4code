@@ -39,7 +39,7 @@ pub fn add_zoom_controllers_to_text_view(
     let app_clone_scroll = app.clone();
     let scroll_controller_clone = scroll_controller.clone();
     scroll_controller.connect_scroll(move |_, _, dy| {
-        if let Some(_) = app_clone_scroll.active_window() {
+        if app_clone_scroll.active_window().is_some() {
             if scroll_controller_clone
                 .current_event_state()
                 .contains(gdk::ModifierType::CONTROL_MASK)
@@ -61,12 +61,12 @@ pub fn add_zoom_controllers_to_text_view(
         glib::Propagation::Proceed
     });
 
-    let current_font_desc_clone_key = current_font_desc.clone();
-    let update_font_clone_key = update_font.clone();
-    let initial_font_size_clone_key = initial_font_size.clone();
-    let app_clone_key = app.clone();
+    let current_font_desc_clone_key = current_font_desc;
+    let update_font_clone_key = update_font;
+    let initial_font_size_clone_key = initial_font_size;
+    let app_clone_key = app;
     key_controller.connect_key_pressed(move |_, keyval, _, state| {
-        if let Some(_) = app_clone_key.active_window() {
+        if app_clone_key.active_window().is_some() {
             if state.contains(gdk::ModifierType::CONTROL_MASK) {
                 let mut font_desc = current_font_desc_clone_key.borrow_mut();
                 let mut current_size = font_desc.size() as f64 / pango::SCALE as f64;

@@ -84,6 +84,10 @@ pub struct AppContext {
     pub last_changed_line: Rc<RefCell<HashMap<TextBuffer, i32>>>,
     /// Change trackers for each buffer
     pub change_trackers: Rc<RefCell<HashMap<TextBuffer, ChangeTracker>>>,
+    /// Cache for indentation styles
+    pub indent_styles: Rc<RefCell<HashMap<TextBuffer, (bool, usize)>>>,
+    /// Cache for compiled regex patterns
+    pub regex_cache: Rc<RefCell<HashMap<String, regex::Regex>>>,
 }
 
 impl AppContext {
@@ -200,16 +204,45 @@ impl AppContext {
             move |font_desc: &pango::FontDescription| {
                 let family = font_desc.family().unwrap_or("Monospace".into());
                 let size_pts = font_desc.size() as f64 / pango::SCALE as f64;
+                let weight = match font_desc.weight() {
+                    pango::Weight::Thin => "100",
+                    pango::Weight::Ultralight => "200",
+                    pango::Weight::Light => "300",
+                    pango::Weight::Semilight => "350",
+                    pango::Weight::Book => "380",
+                    pango::Weight::Normal => "400",
+                    pango::Weight::Medium => "500",
+                    pango::Weight::Semibold => "600",
+                    pango::Weight::Bold => "700",
+                    pango::Weight::Ultrabold => "800",
+                    pango::Weight::Heavy => "900",
+                    pango::Weight::Ultraheavy => "1000",
+                    _ => "400",
+                };
+                let style = match font_desc.style() {
+                    pango::Style::Normal => "normal",
+                    pango::Style::Oblique => "oblique",
+                    pango::Style::Italic => "italic",
+                    _ => "normal",
+                };
+                
                 let css = format!(
-                    r#"textview {{ font-family: \"{}\"; font-size: {}pt; }}"#,
+                    r#"textview, textview text {{ 
+                        font-family: "{}"; 
+                        font-size: {}pt; 
+                        font-weight: {};
+                        font-style: {};
+                    }}"#,
                     family,
-                    size_pts
+                    size_pts,
+                    weight,
+                    style
                 );
                 provider.load_from_data(&css);
 
-                // Redraw the current tab\'s line number area and queue a resize for the window
-                if let Some(page_num) = notebook_clone_for_font_update.current_page() {
-                    if let Some(page) = notebook_clone_for_font_update.nth_page(Some(page_num)) {
+                // Redraw all tabs' line number areas and queue a resize for the window
+                for i in 0..notebook_clone_for_font_update.n_pages() {
+                    if let Some(page) = notebook_clone_for_font_update.nth_page(Some(i)) {
                         if let Some(text_view_with_line_numbers_box) =
                             page.downcast_ref::<gtk4::Box>()
                         {
@@ -231,17 +264,13 @@ impl AppContext {
         // --- Controllers and Signals ---
         let initial_font_size_from_settings = {
             let font_str = &app_settings.borrow().font;
-            // Use regex to parse the font size from the font string (e.g., "Monospace 14" -> 14.0)
-            let re = regex::Regex::new(r"(\d+(\.\d+)?)$").unwrap();
-            if let Some(captures) = re.captures(font_str) {
-                if let Some(size_str) = captures.get(1) {
-                    size_str.as_str().parse::<f64>().unwrap_or(14.0)
-                } else {
-                    14.0
-                }
-            } else {
-                14.0
-            }
+            // Parse the font size from the font string (e.g., "Monospace 14" -> 14.0)
+            // Split by space and take the last part that can be parsed as f64
+            font_str
+                .split_whitespace()
+                .last()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(14.0)
         };
         let initial_font_size = Rc::new(RefCell::new(initial_font_size_from_settings));
 
@@ -259,6 +288,8 @@ impl AppContext {
         let syntax_highlight_timer = Rc::new(RefCell::new(None::<glib::SourceId>));
         let last_changed_line = Rc::new(RefCell::new(HashMap::new()));
         let change_trackers = Rc::new(RefCell::new(HashMap::<TextBuffer, ChangeTracker>::new()));
+        let indent_styles = Rc::new(RefCell::new(HashMap::<TextBuffer, (bool, usize)>::new()));
+        let regex_cache = Rc::new(RefCell::new(HashMap::<String, regex::Regex>::new()));
 
         // Create syntax_context with highlight_closure
         let highlight_closure: Rc<dyn Fn(TextBuffer)> = Rc::new({
@@ -332,41 +363,33 @@ impl AppContext {
                 // Initialize change tracker for this buffer
                 change_trackers.borrow_mut().insert(buffer.clone(), ChangeTracker::new());
                 
-                // connect_changed
-                let syntax_context_clone_for_highlight = syntax_context_clone.clone();
-                let syntax_highlight_timer_clone = syntax_highlight_timer.clone();
-                let change_trackers_clone = change_trackers.clone();
-                buffer.connect_changed(move |buf| {
-                    // Track the changes for incremental highlighting
-                    let mut trackers = change_trackers_clone.borrow_mut();
-                    if let Some(tracker) = trackers.get_mut(buf) {
-                        // For now, we'll mark all lines as changed to maintain compatibility
-                        // In a more advanced implementation, we would track specific insertions/deletions
-                        for i in 0..buf.line_count() {
-                            tracker.changed_lines.insert(i);
-                        }
-                    }
-                    drop(trackers); // Release the borrow
-                    
+                // --- Signal Connections for Highlighting ---
+
+                // Clones for the highlighting timer closure
+                let syntax_context_clone_for_timer = syntax_context_clone.clone();
+                let syntax_highlight_timer_clone_for_timer = syntax_highlight_timer.clone();
+                let change_trackers_clone_for_timer = change_trackers.clone();
+                let buffer_clone_for_timer = buffer.clone();
+
+                let trigger_highlighting_update = Rc::new(move || {
                     // Cancel any existing timer
-                    if let Some(source_id) = syntax_highlight_timer_clone.borrow_mut().take() {
+                    if let Some(source_id) = syntax_highlight_timer_clone_for_timer.borrow_mut().take() {
                         source_id.remove();
                     }
 
-                    let buf_clone = buf.clone();
-                    let syntax_context_clone_inner = syntax_context_clone_for_highlight.clone();
-                    let timer_ref = syntax_highlight_timer_clone.clone();
-                    let change_trackers_timer_clone = change_trackers_clone.clone();
+                    let buf_clone = buffer_clone_for_timer.clone();
+                    let syntax_context_clone_inner = syntax_context_clone_for_timer.clone();
+                    let timer_ref = syntax_highlight_timer_clone_for_timer.clone();
+                    let change_trackers_timer_clone = change_trackers_clone_for_timer.clone();
 
-                    // Set a new timer with a shorter delay for more responsive highlighting
+                    // Set a new timer
                     let source_id = glib::timeout_add_local_once(
-                        std::time::Duration::from_millis(30), // Further reduced delay for responsiveness
+                        std::time::Duration::from_millis(50), // Adjusted delay
                         move || {
-                            // Apply incremental highlighting
-                            let trackers = change_trackers_timer_clone.borrow();
-                            if let Some(tracker) = trackers.get(&buf_clone) {
+                            let mut trackers = change_trackers_timer_clone.borrow_mut();
+                            if let Some(tracker) = trackers.get_mut(&buf_clone) {
                                 if tracker.has_changes() {
-                                    let changed_lines = tracker.changed_lines.clone();
+                                    let changed_lines = tracker.take_changed_lines();
                                     incremental_highlighting::apply_incremental_highlighting(
                                         &buf_clone,
                                         &syntax_context_clone_inner.borrow(),
@@ -374,20 +397,42 @@ impl AppContext {
                                     );
                                 }
                             }
-                            drop(trackers); // Release the borrow
-                            
-                            // Clear the changed lines and timer ID
-                            let mut trackers = change_trackers_timer_clone.borrow_mut();
-                            if let Some(tracker) = trackers.get_mut(&buf_clone) {
-                                tracker.changed_lines.clear();
-                            }
-                            drop(trackers); // Release the borrow
-                            
-                            *timer_ref.borrow_mut() = None; // Clear the timer ID once it fires
+                            *timer_ref.borrow_mut() = None;
                         },
                     );
-                    *syntax_highlight_timer_clone.borrow_mut() = Some(source_id);
+                    *syntax_highlight_timer_clone_for_timer.borrow_mut() = Some(source_id);
                 });
+
+                // Connect insert-text signal
+                let change_trackers_insert = change_trackers.clone();
+                let trigger_highlight_insert = trigger_highlighting_update.clone();
+                buffer.connect_insert_text(move |buf, pos, text| {
+                    let mut end = pos.clone();
+                    end.forward_chars(text.chars().count() as i32);
+                    if let Some(tracker) = change_trackers_insert.borrow_mut().get_mut(buf) {
+                        tracker.record_insertion(pos, &end, text);
+                    }
+                    trigger_highlight_insert();
+                });
+
+                // Connect delete-range signal
+                let change_trackers_delete = change_trackers.clone();
+                let trigger_highlight_delete = trigger_highlighting_update.clone();
+                buffer.connect_delete_range(move |buf, start, end| {
+                    if let Some(tracker) = change_trackers_delete.borrow_mut().get_mut(buf) {
+                        tracker.record_deletion(start, end);
+                    }
+                    trigger_highlight_delete();
+                });
+
+                // Also connect the "changed" signal, but only to redraw the line numbers.
+                // This is less expensive than a full highlight.
+                let line_numbers_area = text_view.parent().and_then(|p| p.parent()).and_then(|p| p.first_child());
+                if let Some(drawing_area) = line_numbers_area.and_then(|w| w.downcast::<gtk4::DrawingArea>().ok()) {
+                    buffer.connect_changed(move |_| {
+                        drawing_area.queue_draw();
+                    });
+                }
 
                 // connect_mark_set
                 let status_bar_clone_for_mark_set_closure = status_bar.clone();
@@ -466,6 +511,8 @@ impl AppContext {
             syntax_highlight_timer,
             last_changed_line,
             change_trackers,
+            indent_styles,
+            regex_cache,
         }));
 
 
@@ -514,7 +561,7 @@ impl AppContext {
         setup_actions(new_context_rc.clone());
 
         // Populate the tree view with the initial directory
-        populate_tree_view(&tree_store, &initial_directory);
+        populate_tree_view(&window, &tree_store, &initial_directory);
 
         // --- Tree View Row Activation ---
         let app_context_clone_tree_view = new_context_rc.clone();
@@ -549,30 +596,35 @@ impl AppContext {
         // Connect to the window's close-request signal to handle unsaved changes
         let app_context_clone_for_window_close = new_context_rc.clone();
         window.connect_close_request(move |_window| {
-            let context = app_context_clone_for_window_close.borrow();
-            
             // Check if any files have unsaved changes
             let (has_unsaved_changes, first_unsaved_buffer, first_unsaved_file_path, first_unsaved_page_index) = {
+                let context = app_context_clone_for_window_close.borrow();
                 let mut has_unsaved_changes = false;
                 let mut first_unsaved_buffer = None;
                 let mut first_unsaved_file_path = None;
                 let mut first_unsaved_page_index = 0;
 
-                for i in 0..context.notebook.n_pages() {
-                    if let Some(page) = context.notebook.nth_page(Some(i)) {
-                        if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
-                            let buffer = text_view.buffer();
-                            let buffer_paths_borrowed = context.buffer_paths.borrow();
-                            let file_path = buffer_paths_borrowed.get(&buffer).cloned();
+                // Collect all buffers and their file paths first to minimize borrowing
+                let buffers_and_paths: Vec<_> = (0..context.notebook.n_pages())
+                    .filter_map(|i| {
+                        context.notebook.nth_page(Some(i)).and_then(|page| {
+                            crate::ui::helpers::get_text_view_from_page(&page).map(|text_view| {
+                                let buffer = text_view.buffer();
+                                let file_path = context.buffer_paths.borrow().get(&buffer).cloned();
+                                (buffer, file_path, i)
+                            })
+                        })
+                    })
+                    .collect();
 
-                            if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
-                                has_unsaved_changes = true;
-                                first_unsaved_buffer = Some(buffer);
-                                first_unsaved_file_path = file_path;
-                                first_unsaved_page_index = i;
-                                break;
-                            }
-                        }
+                // Check for modifications without holding borrows
+                for (buffer, file_path, i) in buffers_and_paths {
+                    if tab_manager::is_buffer_modified(&buffer, file_path.as_ref()) {
+                        has_unsaved_changes = true;
+                        first_unsaved_buffer = Some(buffer);
+                        first_unsaved_file_path = file_path;
+                        first_unsaved_page_index = i;
+                        break;
                     }
                 }
                 (has_unsaved_changes, first_unsaved_buffer, first_unsaved_file_path, first_unsaved_page_index)
@@ -581,6 +633,7 @@ impl AppContext {
             if has_unsaved_changes {
                 if let Some(buffer) = first_unsaved_buffer {
                     let app_context_clone_for_prompt = app_context_clone_for_window_close.clone();
+                    let context = app_context_clone_for_window_close.borrow();
 
                     tab_manager::prompt_save_changes_async(
                         &context.window,

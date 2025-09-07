@@ -6,6 +6,11 @@
 use gtk4::TextBuffer;
 use gtk4::prelude::*;
 use regex::Regex;
+use equivalent::Comparable;
+use std::cmp::Ordering;
+use crate::AppContext;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 /// Gets the currently selected text or word under cursor
 pub fn get_selected_text_or_word(buffer: &TextBuffer) -> String {
@@ -248,6 +253,8 @@ fn find_next_regex(
     pattern: &str,
     match_case: bool,
 ) -> Option<(gtk4::TextIter, gtk4::TextIter)> {
+    // Note: This function would need access to app_context to use the cache
+    // For now, we'll keep the original implementation
     match compile_regex(pattern, match_case) {
         Ok(regex) => {
             // Get current cursor position
@@ -297,6 +304,8 @@ fn find_previous_regex(
     pattern: &str,
     match_case: bool,
 ) -> Option<(gtk4::TextIter, gtk4::TextIter)> {
+    // Note: This function would need access to app_context to use the cache
+    // For now, we'll keep the original implementation
     match compile_regex(pattern, match_case) {
         Ok(regex) => {
             // Get current cursor position
@@ -517,21 +526,71 @@ fn replace_all_regex(
     replacement_text: &str,
     match_case: bool,
 ) -> u32 {
+    // Note: This function would need access to app_context to use the cache
+    // For now, we'll keep the original implementation but optimize the loop
     match compile_regex(pattern, match_case) {
         Ok(regex) => {
-            let text = buffer
-                .text(&buffer.start_iter(), &buffer.end_iter(), false)
-                .to_string();
-            let result = regex.replace_all(&text, replacement_text).to_string();
+            let mut count = 0;
+            let mut matches = Vec::new();
 
-            // Replace the entire buffer content
+            // First, collect all matches without modifying the buffer
+            let mut iter = buffer.start_iter();
+            let end_iter_buffer = buffer.end_iter();
+
+            while iter.compare(&end_iter_buffer) == Ordering::Less {
+                let remaining_text = buffer.text(&iter, &end_iter_buffer, false).to_string();
+                if let Some(mat) = regex.find(&remaining_text) {
+                    let start_offset = iter.offset() + mat.start() as i32;
+                    let end_offset = iter.offset() + mat.end() as i32;
+                    matches.push((start_offset, end_offset));
+
+                    // Advance iter past the current match to find the next one
+                    iter.set_offset(end_offset);
+                } else {
+                    // No more matches in the remaining text
+                    break;
+                }
+            }
+
+            // Now perform replacements in reverse order to maintain correct positions
             buffer.begin_user_action();
-            buffer.set_text(&result);
+            for (start_offset, end_offset) in matches.iter().rev() {
+                let mut start_match_iter = buffer.iter_at_offset(*start_offset);
+                let mut end_match_iter = buffer.iter_at_offset(*end_offset);
+
+                let matched_text = buffer.text(&start_match_iter, &end_match_iter, false).to_string();
+                let actual_replacement = regex.replace(&matched_text, replacement_text).to_string();
+
+                buffer.delete(&mut start_match_iter, &mut end_match_iter);
+                buffer.insert(&mut start_match_iter, &actual_replacement);
+                count += 1;
+            }
             buffer.end_user_action();
 
-            // Count matches for return value
-            regex.find_iter(&text).count() as u32
+            count
         }
         Err(_) => 0,
     }
+}
+
+/// Compiles a regex pattern with optional case insensitivity, using a cache
+pub fn compile_regex_with_cache(app_context: &Rc<RefCell<AppContext>>, pattern: &str, match_case: bool) -> Result<Regex, regex::Error> {
+    let cache_key = if match_case {
+        pattern.to_string()
+    } else {
+        format!("(?i){}", pattern)
+    };
+    
+    // Try to get from cache first
+    {
+        let context = app_context.borrow();
+        if let Some(cached_regex) = context.regex_cache.borrow().get(&cache_key) {
+            return Ok(cached_regex.clone());
+        }
+    }
+    
+    // If not in cache, compile and store
+    let regex = Regex::new(&cache_key)?;
+    app_context.borrow().regex_cache.borrow_mut().insert(cache_key, regex.clone());
+    Ok(regex)
 }

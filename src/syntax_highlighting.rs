@@ -65,17 +65,24 @@ pub fn apply_syntax_highlighting(
     let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
     let tag_table = buffer.tag_table();
 
-    // Removes only syntect tags (diagnostics, highlight)
-    let mut tags_to_remove = Vec::new();
-    tag_table.foreach(|tag| {
-        if let Some(name) = tag.name() {
-            if name.starts_with("fg_") {
-                tags_to_remove.push(tag.clone());
+    // Collect syntect tags to remove them efficiently
+    let syntect_tags: Vec<_> = {
+        let mut tags = Vec::new();
+        tag_table.foreach(|tag| {
+            if let Some(name) = tag.name() {
+                if name.starts_with("fg_") {
+                    tags.push(tag.clone());
+                }
             }
-        }
-    });
-    for tag in tags_to_remove {
-        buffer.remove_tag(&tag, &buffer.start_iter(), &buffer.end_iter());
+        });
+        tags
+    };
+
+    // Remove only syntect tags (diagnostics, highlight)
+    let start_iter = buffer.start_iter();
+    let end_iter = buffer.end_iter();
+    for tag in syntect_tags {
+        buffer.remove_tag(&tag, &start_iter, &end_iter);
     }
 
     // syntect for syntax highlighting
@@ -169,6 +176,19 @@ pub fn apply_incremental_syntax_highlighting(
 
     let tag_table = buffer.tag_table();
 
+    // Collect syntect tags to remove them efficiently
+    let syntect_tags: Vec<_> = {
+        let mut tags = Vec::new();
+        tag_table.foreach(|tag| {
+            if let Some(name) = tag.name() {
+                if name.starts_with("fg_") {
+                    tags.push(tag.clone());
+                }
+            }
+        });
+        tags
+    };
+
     // Remove syntect tags from the specified range
     if let (Some(start_iter), Some(end_iter)) = (
         buffer.iter_at_line(start_line),
@@ -178,23 +198,22 @@ pub fn apply_incremental_syntax_highlighting(
             Some(buffer.end_iter())
         },
     ) {
-        let mut tags_to_remove = Vec::new();
-        tag_table.foreach(|tag| {
-            if let Some(name) = tag.name() {
-                if name.starts_with("fg_") {
-                    tags_to_remove.push(tag.clone());
-                }
-            }
-        });
-        for tag in tags_to_remove {
+        for tag in syntect_tags {
             buffer.remove_tag(&tag, &start_iter, &end_iter);
         }
     }
 
-    // syntect for syntax highlighting
+    // Initialize HighlightLines and advance its state up to start_line
     let mut h = syntect::easy::HighlightLines::new(syntax, theme);
-    for line_num in 0..buffer_line_count {
-        // Get the line text
+    for line_num in 0..start_line {
+        let line_start = buffer.iter_at_line(line_num).unwrap();
+        let line_end = buffer.iter_at_line(line_num + 1).unwrap_or_else(|| buffer.end_iter());
+        let line_text = buffer.text(&line_start, &line_end, false);
+        let _ = h.highlight_line(&line_text, ps); // Process to maintain state
+    }
+
+    // Apply syntax highlighting for the specified range
+    for line_num in start_line..=end_line {
         let line_start = buffer.iter_at_line(line_num).unwrap();
         let line_end = if line_num + 1 < buffer_line_count {
             buffer.iter_at_line(line_num + 1).unwrap()
@@ -203,64 +222,58 @@ pub fn apply_incremental_syntax_highlighting(
         };
         let line_text = buffer.text(&line_start, &line_end, false);
         
-        // Only highlight lines in the specified range
-        if line_num >= start_line && line_num <= end_line {
-            if let Ok(ranges) = h.highlight_line(&line_text, ps) {
-                let mut current_offset = 0;
-                for (style, chunk) in ranges {
-                    if let (Some(start_iter), Some(end_iter)) = (
-                        buffer.iter_at_line_offset(line_num, current_offset),
-                        buffer.iter_at_line_offset(
-                            line_num,
-                            current_offset + chunk.chars().count() as i32,
-                        ),
-                    ) {
-                        let tag_name = format!(
-                            "fg_{:02x}{:02x}{:02x}{:02x}_bg_{:02x}{:02x}{:02x}{:02x}",
-                            style.foreground.r,
-                            style.foreground.g,
-                            style.foreground.b,
-                            style.foreground.a,
-                            style.background.r,
-                            style.background.g,
-                            style.background.b,
-                            style.background.a
-                        );
-                        let tag = if let Some(existing_tag) = tag_table.lookup(&tag_name) {
-                            existing_tag
-                        } else {
-                            let new_tag = TextTag::new(Some(&tag_name));
-                            // Set foreground color
-                            new_tag.set_foreground_rgba(Some(&gdk::RGBA::new(
-                                style.foreground.r as f32 / 255.0,
-                                style.foreground.g as f32 / 255.0,
-                                style.foreground.b as f32 / 255.0,
-                                style.foreground.a as f32 / 255.0,
+        if let Ok(ranges) = h.highlight_line(&line_text, ps) {
+            let mut current_offset = 0;
+            for (style, chunk) in ranges {
+                if let (Some(start_iter), Some(end_iter)) = (
+                    buffer.iter_at_line_offset(line_num, current_offset),
+                    buffer.iter_at_line_offset(
+                        line_num,
+                        current_offset + chunk.chars().count() as i32,
+                    ),
+                ) {
+                    let tag_name = format!(
+                        "fg_{:02x}{:02x}{:02x}{:02x}_bg_{:02x}{:02x}{:02x}{:02x}",
+                        style.foreground.r,
+                        style.foreground.g,
+                        style.foreground.b,
+                        style.foreground.a,
+                        style.background.r,
+                        style.background.g,
+                        style.background.b,
+                        style.background.a
+                    );
+                    let tag = if let Some(existing_tag) = tag_table.lookup(&tag_name) {
+                        existing_tag
+                    } else {
+                        let new_tag = TextTag::new(Some(&tag_name));
+                        // Set foreground color
+                        new_tag.set_foreground_rgba(Some(&gdk::RGBA::new(
+                            style.foreground.r as f32 / 255.0,
+                            style.foreground.g as f32 / 255.0,
+                            style.foreground.b as f32 / 255.0,
+                            style.foreground.a as f32 / 255.0,
+                        )));
+                        // Set background color if different from default
+                        if style.background.r != 0
+                            || style.background.g != 0
+                            || style.background.b != 0
+                            || style.background.a != 0
+                        {
+                            new_tag.set_background_rgba(Some(&gdk::RGBA::new(
+                                style.background.r as f32 / 255.0,
+                                style.background.g as f32 / 255.0,
+                                style.background.b as f32 / 255.0,
+                                style.background.a as f32 / 255.0,
                             )));
-                            // Set background color if different from default
-                            if style.background.r != 0
-                                || style.background.g != 0
-                                || style.background.b != 0
-                                || style.background.a != 0
-                            {
-                                new_tag.set_background_rgba(Some(&gdk::RGBA::new(
-                                    style.background.r as f32 / 255.0,
-                                    style.background.g as f32 / 255.0,
-                                    style.background.b as f32 / 255.0,
-                                    style.background.a as f32 / 255.0,
-                                )));
-                            }
-                            tag_table.add(&new_tag);
-                            new_tag
-                        };
-                        buffer.apply_tag(&tag, &start_iter, &end_iter);
-                    }
-                    current_offset += chunk.chars().count() as i32;
+                        }
+                        tag_table.add(&new_tag);
+                        new_tag
+                    };
+                    buffer.apply_tag(&tag, &start_iter, &end_iter);
                 }
+                current_offset += chunk.chars().count() as i32;
             }
-        } else {
-            // For lines outside the range, just parse to maintain state
-            let _ = h.highlight_line(&line_text, ps);
         }
     }
 }
@@ -291,16 +304,13 @@ pub fn update_bracket_highlighting(
     if let Some(tag) = tag_table.lookup("bracket_match") {
         if let Some(prev_pos1) = prev_bracket_pos1.borrow_mut().take() {
             if let Some(prev_pos2) = prev_bracket_pos2.borrow_mut().take() {
-                buffer.remove_tag(&tag, &prev_pos1, &{
-                    let mut i = prev_pos1.clone();
-                    i.forward_char();
-                    i
-                });
-                buffer.remove_tag(&tag, &prev_pos2, &{
-                    let mut i = prev_pos2.clone();
-                    i.forward_char();
-                    i
-                });
+                let mut i1 = prev_pos1.clone();
+                i1.forward_char();
+                buffer.remove_tag(&tag, &prev_pos1, &i1);
+                
+                let mut i2 = prev_pos2.clone();
+                i2.forward_char();
+                buffer.remove_tag(&tag, &prev_pos2, &i2);
             }
         }
     }
@@ -316,16 +326,14 @@ pub fn update_bracket_highlighting(
             tag_table.add(&new_tag);
             new_tag
         };
-        buffer.apply_tag(&tag, &iter, &{
-            let mut i = iter.clone();
-            i.forward_char();
-            i
-        });
-        buffer.apply_tag(&tag, &matching_iter, &{
-            let mut i = matching_iter.clone();
-            i.forward_char();
-            i
-        });
+        
+        let mut i1 = iter.clone();
+        i1.forward_char();
+        buffer.apply_tag(&tag, &iter, &i1);
+        
+        let mut i2 = matching_iter.clone();
+        i2.forward_char();
+        buffer.apply_tag(&tag, &matching_iter, &i2);
 
         // Store current bracket positions
         *prev_bracket_pos1.borrow_mut() = Some(iter);

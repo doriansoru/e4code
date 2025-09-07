@@ -54,16 +54,14 @@ pub fn open_file_in_new_tab(
     // Use a block to limit the scope of the immutable borrow
     {
         let buffer_paths_borrowed = buffer_paths.borrow();
-        for (buffer, existing_path) in buffer_paths_borrowed.iter() {
-            if existing_path == path {
-                // File is already open, switch to its tab
-                for i in 0..notebook.n_pages() {
-                    if let Some(page) = notebook.nth_page(Some(i)) {
-                        if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
-                            if text_view.buffer() == *buffer {
-                                notebook.set_current_page(Some(i));
-                                return; // Exit the function as we've switched to the existing tab
-                            }
+        if let Some((buffer, _)) = buffer_paths_borrowed.iter().find(|(_, existing_path)| *existing_path == path) {
+            // File is already open, switch to its tab
+            for i in 0..notebook.n_pages() {
+                if let Some(page) = notebook.nth_page(Some(i)) {
+                    if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                        if &text_view.buffer() == buffer {
+                            notebook.set_current_page(Some(i));
+                            return; // Exit the function as we've switched to the existing tab
                         }
                     }
                 }
@@ -160,13 +158,14 @@ pub fn open_file_in_new_tab(
             }
 
             highlight_closure(new_buffer.clone());
+            crate::indentation::detect_indent_style(app_context, &new_buffer);
         }
         Err(e) => {
-            eprintln!("Error reading file: {}", e);
-            // Show error dialog
-            // We need to get a reference to the window for the dialog
-            // For now, we'll just print the error to console
-            // In a full implementation, we'd pass the window reference to this function
+            crate::dialogs::show_error_dialog(
+                &app_context.borrow().window,
+                "Error reading file",
+                &format!("Could not read file: {}", e),
+            );
         }
     }
 }
@@ -251,27 +250,19 @@ pub fn create_new_file_tab(
     // Generate a unique name for the new tab
     let mut tab_name = "Untitled-1".to_string();
     let mut counter = 1;
-    loop {
-        let mut name_exists = false;
-        for i in 0..notebook.n_pages() {
-            if let Some(page) = notebook.nth_page(Some(i)) {
-                if let Some(label_widget) = notebook.tab_label(&page) {
-                    if let Some(tab_box) = label_widget.downcast_ref::<Box>() {
-                        if let Some(child_widget) = tab_box.first_child() {
-                            if let Some(label) = child_widget.downcast_ref::<Label>() {
-                                if label.text().as_str() == tab_name {
-                                    name_exists = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if !name_exists {
-            break;
-        }
+    
+    // Collect existing tab names for efficient lookup
+    let existing_names: std::collections::HashSet<String> = (0..notebook.n_pages())
+        .filter_map(|i| {
+            notebook.nth_page(Some(i))
+                .and_then(|page| notebook.tab_label(&page))
+                .and_then(|label_widget| label_widget.downcast_ref::<Box>().cloned())
+                .and_then(|tab_box| tab_box.first_child())
+                .and_then(|child_widget| child_widget.downcast_ref::<Label>().map(|label| label.text().to_string()))
+        })
+        .collect();
+    
+    while existing_names.contains(&tab_name) {
         counter += 1;
         tab_name = format!("Untitled-{}", counter);
     }
@@ -300,6 +291,7 @@ pub fn create_new_file_tab(
     }
 
     highlight_closure(new_buffer.clone());
+    crate::indentation::detect_indent_style(app_context, &new_buffer);
 }
 
 /// Checks if a buffer has been modified
@@ -358,7 +350,7 @@ pub fn prompt_save_changes_async<F>(
                 // User wants to save
                 if let Some(path) = &file_path {
                     if let Err(e) = save_buffer_to_file(&parent_clone, &buffer_clone, path) {
-                        eprintln!("Error saving file: {}", e);
+                        
                         // Show error dialog
                         crate::dialogs::show_error_dialog(
                             &parent_clone,
@@ -390,7 +382,7 @@ pub fn prompt_save_changes_async<F>(
                     let notebook_clone2 = notebook_clone.clone();
 
                     crate::file_operations::save_file_dialog(
-                        &parent_clone2,
+                        parent_clone2.clone().into(),
                         buffer_clone2,
                         buffer_paths_clone2,
                         Some(notebook_clone2),
