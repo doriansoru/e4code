@@ -103,13 +103,6 @@ pub fn update_tab_label(
 }
 
 /// Opens a file chooser dialog for saving files
-///
-/// # Arguments
-///
-/// * `parent` - The parent window for the dialog (passed by value).
-/// * `buffer` - The TextBuffer whose content is to be saved.
-/// * `buffer_paths` - A shared map of TextBuffers to their file paths.
-/// * `notebook` - An optional Notebook to update the tab label after saving.
 pub fn save_file_dialog(
     parent: gtk4::Window,
     buffer: gtk4::TextBuffer,
@@ -169,12 +162,6 @@ pub fn save_file_dialog(
 }
 
 /// Populates the tree view with directory contents
-///
-/// # Arguments
-///
-/// * `parent` - The parent window for displaying error dialogs.
-/// * `tree_store` - The TreeStore to populate.
-/// * `path` - The path to the directory to read.
 pub fn populate_tree_view(parent: &impl IsA<gtk4::Window>, tree_store: &TreeStore, path: &std::path::Path) {
     tree_store.clear();
 

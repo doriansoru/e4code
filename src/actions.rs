@@ -217,7 +217,7 @@ pub fn setup_actions(app_context: Rc<RefCell<AppContext>>) {
         if let Some(text_view) = crate::ui::helpers::get_current_text_view(&context.notebook) {
             let buffer = text_view.buffer();
             let initial_text = search::get_selected_text_or_word(&buffer);
-            let (dialog, search_entry, replace_entry, match_case_cb, whole_word_cb, regex_cb, status_label) = search_dialog::create_search_replace_dialog(&context.window, &initial_text);
+            let (dialog, search_entry, replace_entry, match_case_cb, whole_word_cb, regex_cb, status_label) = search_dialog::create_search_replace_dialog(&context.window, &initial_text, &buffer);
 
             let buffer_clone = buffer.clone();
             let text_view_clone = text_view.clone();

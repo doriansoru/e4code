@@ -4,6 +4,9 @@
 
 use gtk4::prelude::*;
 use gtk4::{Align, Box, CheckButton, Dialog, Entry, Label, Orientation, ResponseType};
+use std::rc::Rc;
+use std::cell::RefCell;
+use crate::search; // Import the search module
 
 pub const RESPONSE_TYPE_FIND_PREVIOUS: ResponseType = ResponseType::Other(0);
 pub const RESPONSE_TYPE_REPLACE_ALL: ResponseType = ResponseType::Other(1);
@@ -18,6 +21,7 @@ pub const RESPONSE_TYPE_REPLACE_ALL: ResponseType = ResponseType::Other(1);
 ///
 /// * `parent` - Parent window for the dialog
 /// * `initial_text` - Initial text to populate the search field with
+/// * `buffer` - The TextBuffer to perform search operations on
 ///
 /// # Returns
 ///
@@ -25,6 +29,7 @@ pub const RESPONSE_TYPE_REPLACE_ALL: ResponseType = ResponseType::Other(1);
 pub fn create_search_replace_dialog(
     parent: &impl IsA<gtk4::Window>,
     initial_text: &str,
+    buffer: &gtk4::TextBuffer,
 ) -> (
     Dialog,
     Entry,
@@ -86,6 +91,16 @@ pub fn create_search_replace_dialog(
 
     content_area.append(&vbox);
 
+    // Connect signals for counting occurrences
+    connect_search_events(
+        buffer,
+        &search_entry,
+        &match_case_cb,
+        &whole_word_cb,
+        &regex_cb,
+        &status_label,
+    );
+
     (
         dialog,
         search_entry,
@@ -95,4 +110,65 @@ pub fn create_search_replace_dialog(
         regex_cb,
         status_label,
     )
+}
+
+/// Connects signals to update the occurrence count in the status label
+pub fn connect_search_events(
+    buffer: &gtk4::TextBuffer,
+    search_entry: &Entry,
+    match_case_cb: &CheckButton,
+    whole_word_cb: &CheckButton,
+    regex_cb: &CheckButton,
+    status_label: &Label,
+) {
+    let buffer_clone = buffer.clone();
+    let search_entry_clone = search_entry.clone();
+    let match_case_cb_clone = match_case_cb.clone();
+    let whole_word_cb_clone = whole_word_cb.clone();
+    let regex_cb_clone = regex_cb.clone();
+    let status_label_clone = status_label.clone();
+
+    let update_count = Rc::new(RefCell::new(move || {
+        let search_text = search_entry_clone.text().to_string();
+        let match_case = match_case_cb_clone.is_active();
+        let whole_word = whole_word_cb_clone.is_active();
+        let use_regex = regex_cb_clone.is_active();
+
+        let count = search::count_all_occurrences(
+            &buffer_clone,
+            &search_text,
+            match_case,
+            whole_word,
+            use_regex,
+        );
+        if search_text.is_empty() {
+            status_label_clone.set_text("");
+        } else {
+            status_label_clone.set_text(&format!("{} occurrences found", count));
+        }
+    }));
+
+    // Initial count update
+    update_count.borrow()();
+
+    // Connect signals
+    let update_count_clone_1 = update_count.clone();
+    search_entry.connect_changed(move |_e| {
+        update_count_clone_1.borrow()();
+    });
+
+    let update_count_clone_2 = update_count.clone();
+    match_case_cb.connect_toggled(move |_e| {
+        update_count_clone_2.borrow()();
+    });
+
+    let update_count_clone_3 = update_count.clone();
+    whole_word_cb.connect_toggled(move |_e| {
+        update_count_clone_3.borrow()();
+    });
+
+    let update_count_clone_4 = update_count.clone();
+    regex_cb.connect_toggled(move |_e| {
+        update_count_clone_4.borrow()();
+    });
 }

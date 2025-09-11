@@ -2,6 +2,7 @@
 //!
 //! This module sets up the GTK application, initializes the main window,
 //! and manages the core application context.
+#![windows_subsystem = "windows"]
 
 mod actions;
 mod buffer_tags;
