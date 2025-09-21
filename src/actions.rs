@@ -488,8 +488,37 @@ pub fn setup_actions(app_context: Rc<RefCell<AppContext>>) {
     });
     app.add_action(&quit_action);
 
+    let word_wrap_action = SimpleAction::new_stateful(
+        "word_wrap",
+        None,
+        &false.to_variant(),
+    );
+    let app_context_clone = app_context_for_closures.clone();
+    word_wrap_action.connect_activate(move |action, _| {
+        let state = action.state().unwrap().get::<bool>().unwrap();
+        let new_state = !state;
+        action.set_state(&new_state.to_variant());
+
+        let context = app_context_clone.borrow();
+        let wrap_mode = if new_state {
+            gtk4::WrapMode::WordChar
+        } else {
+            gtk4::WrapMode::None
+        };
+
+        for i in 0..context.notebook.n_pages() {
+            if let Some(page) = context.notebook.nth_page(Some(i)) {
+                if let Some(text_view) = crate::ui::helpers::get_text_view_from_page(&page) {
+                    text_view.set_wrap_mode(wrap_mode);
+                }
+            }
+        }
+    });
+    app.add_action(&word_wrap_action);
+
     // Set accelerators for actions
     app.set_accels_for_action("app.new", &["<Control>n"]);
+    app.set_accels_for_action("app.word_wrap", &["<Alt>w"]);
     app.set_accels_for_action("app.open", &["<Control>o"]);
     app.set_accels_for_action("app.close_current_file", &["<Control>w"]);
     app.set_accels_for_action("app.close_all_files", &["<Control><Shift>w"]);

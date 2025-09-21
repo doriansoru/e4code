@@ -86,6 +86,21 @@ pub fn open_file_in_new_tab(
                 .vexpand(true)
                 .build();
 
+            let mut action_state = false;
+            if let Some(action) = app.lookup_action("word_wrap") {
+                if let Some(state) = action.state() {
+if let Some(state_bool) = state.get::<bool>() {
+                        action_state = state_bool;
+                    }
+                }
+            }
+
+            if action_state {
+                new_text_view.set_wrap_mode(gtk4::WrapMode::WordChar);
+            } else {
+                new_text_view.set_wrap_mode(gtk4::WrapMode::None);
+            }
+
             add_zoom_controllers_to_text_view(
                 &new_text_view,
                 current_font_desc.clone(),
@@ -208,6 +223,21 @@ pub fn create_new_file_tab(
         .hexpand(true)
         .vexpand(true)
         .build();
+
+    let mut action_state = false;
+    if let Some(action) = app.lookup_action("word_wrap") {
+        if let Some(state) = action.state() {
+            if let Some(state_bool) = state.get::<bool>() {
+                action_state = state_bool;
+            }
+        }
+    }
+
+    if action_state {
+        new_text_view.set_wrap_mode(gtk4::WrapMode::WordChar);
+    } else {
+        new_text_view.set_wrap_mode(gtk4::WrapMode::None);
+    }
 
     add_zoom_controllers_to_text_view(
         &new_text_view,

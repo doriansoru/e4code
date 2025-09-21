@@ -540,6 +540,7 @@ impl AppContext {
         edit_menu_model.append(Some("Paste"), Some("app.paste"));
         edit_menu_model.append(Some("Indent"), Some("app.indent"));
         edit_menu_model.append(Some("Outdent"), Some("app.outdent"));
+        edit_menu_model.append(Some("Word wrap"), Some("app.word_wrap"));
         let edit_popover = PopoverMenu::from_model(Some(&edit_menu_model));
         edit_menu_button.set_popover(Some(&edit_popover));
         header_bar.pack_start(&edit_menu_button);
