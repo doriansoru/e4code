@@ -23,6 +23,7 @@ This editor will have the following functions:
 *   Paste
 *   Indent
 *   Outdent
+*   Word wrap
 
 ### Settings
 
